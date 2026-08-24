@@ -1,0 +1,9 @@
+{"timestamp":"2025-10-02T01:00:00Z","type":"session_meta","payload":{"id":"session-legacy-multi","cwd":"/work/legacy"}}
+{"timestamp":"2025-10-02T01:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"<environment_context>\n  <cwd>/work/legacy</cwd>\n  <shell>zsh</shell>\n</environment_context>"}}
+{"timestamp":"2025-10-02T01:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"Explain the first implementation"}}
+{"timestamp":"2025-10-02T01:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The first implementation used files."}]}}
+{"timestamp":"2025-10-02T01:00:04Z","type":"event_msg","payload":{"type":"agent_message","message":"The first implementation used files."}}
+{"timestamp":"2025-10-02T01:00:05Z","type":"event_msg","payload":{"type":"user_message","message":"What changed later?"}}
+{"timestamp":"2025-10-02T01:00:06Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The later implementation used SQLite."}]}}
+{"timestamp":"2025-10-02T01:00:07Z","type":"event_msg","payload":{"type":"agent_message","message":"The later implementation used SQLite."}}
+

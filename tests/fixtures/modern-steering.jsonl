@@ -1,0 +1,7 @@
+{"timestamp":"2026-08-20T05:00:00Z","type":"session_meta","payload":{"id":"session-steering","cwd":"/work/modern"}}
+{"timestamp":"2026-08-20T05:00:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-steering"}}
+{"timestamp":"2026-08-20T05:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"Implement the parser"}}
+{"timestamp":"2026-08-20T05:00:03Z","type":"event_msg","payload":{"type":"user_message","message":"Also preserve steering messages"}}
+{"timestamp":"2026-08-20T05:00:04Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Both requests are implemented."}]}}
+{"timestamp":"2026-08-20T05:00:05Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-steering"}}
+

@@ -1,0 +1,15 @@
+{"timestamp":"2026-08-20T06:00:00Z","type":"session_meta","payload":{"id":"session-schema-noise","cwd":"/work/noise"}}
+{"timestamp":"2026-08-20T06:00:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-noise"}}
+{"timestamp":"2026-08-20T06:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"Keep only meaningful content"}}
+{"timestamp":"2026-08-20T06:00:03Z","type":"event_msg","payload":{"type":"exec_command_end"}}
+{"timestamp":"2026-08-20T06:00:04Z","type":"event_msg","payload":{"type":"mcp_tool_call_end"}}
+{"timestamp":"2026-08-20T06:00:05Z","type":"response_item","payload":{"type":"ghost_snapshot"}}
+{"timestamp":"2026-08-20T06:00:06Z","type":"response_item","payload":{"type":"tool_search_output"}}
+{"timestamp":"2026-08-20T06:00:07Z","type":"inter_agent_communication_metadata","payload":{}}
+{"timestamp":"2026-08-20T06:00:08Z","type":"event_msg","payload":{"type":"future_event"}}
+{"timestamp":"2026-08-20T06:00:09Z","type":"event_msg","payload":{"type":"future_event"}}
+{"timestamp":"2026-08-20T06:00:10Z","type":"response_item","payload":{"type":"future_item"}}
+{"timestamp":"2026-08-20T06:00:11Z","type":"response_item","payload":{"type":"future_item"}}
+{"timestamp":"2026-08-20T06:00:12Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Meaningful content is retained."}]}}
+{"timestamp":"2026-08-20T06:00:13Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-noise"}}
+

@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lodex"
+version = "0.1.0"
+description = "Local-first retrieval for Codex session history"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.28,<0.29",
+  "ollama>=0.6,<0.7",
+]
+
+[project.scripts]
+lodex = "lodex.cli:main"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.15,<2",
+  "pytest>=8.3,<9",
+  "ruff>=0.11,<0.12",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lodex"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+markers = [
+  "ollama: requires a running local Ollama service and installed embedding model",
+]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]

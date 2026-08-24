@@ -1,0 +1,6 @@
+{"timestamp":"2026-08-20T04:00:00Z","type":"session_meta","payload":{"id":"session-truncated","cwd":"/work/broken"}}
+{"timestamp":"2026-08-20T04:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"Keep valid records"}}
+{"timestamp":"2026-08-20T04:00:02Z","type":"mystery","payload":{}}
+{"timestamp":"2026-08-20T04:00:03Z","type":"event_msg","payload":{"type":"agent_message","message":"This final line is still retained."}}
+{"timestamp":"broken"
+
