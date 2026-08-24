@@ -14,7 +14,6 @@ from lodex.embedding import (
     OllamaEmbedder,
     OllamaUnavailableError,
 )
-from tests.fakes import FakeEmbedder
 
 
 class TransientResponseError(Exception):
@@ -206,13 +205,3 @@ def test_truncate_false_and_oversize_input_is_rejected_before_request() -> None:
         embedder.embed_documents(["x" * 21])
 
     assert client.embed_calls == []
-
-
-def test_fake_embedder_is_deterministic_and_tracks_calls() -> None:
-    fake = FakeEmbedder(dimension=4)
-
-    first = fake.embed_documents(["a", "b"])
-    second = fake.embed_documents(["a", "b"])
-
-    assert first == second
-    assert fake.document_calls == [["a", "b"], ["a", "b"]]

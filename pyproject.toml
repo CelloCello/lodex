@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
   "httpx>=0.28,<0.29",
   "ollama>=0.6,<0.7",
+  "sqlite-vec>=0.1.9,<0.2",
 ]
 
 [project.scripts]

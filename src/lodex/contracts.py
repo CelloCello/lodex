@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 TurnStatus = Literal["completed", "aborted", "active"]
-EmbeddingPurpose = Literal["document", "query"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,14 +62,6 @@ class ChunkRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class EmbeddingRequest:
-    """Provider-independent embedding request."""
-
-    inputs: tuple[str, ...]
-    purpose: EmbeddingPurpose
-
-
-@dataclass(frozen=True, slots=True)
 class EmbeddingResult:
     """Validated embeddings and the model identity that produced them."""
 
@@ -83,7 +74,7 @@ class EmbeddingResult:
 
 @dataclass(frozen=True, slots=True)
 class IndexSummary:
-    """Machine-readable counters shared by future indexing commands."""
+    """Machine-readable counters from one indexing pass."""
 
     scanned_sessions: int = 0
     parsed_sessions: int = 0
@@ -91,7 +82,62 @@ class IndexSummary:
     unchanged_sessions: int = 0
     indexed_turns: int = 0
     embedded_chunks: int = 0
+    missing_sessions: int = 0
+    pruned_sessions: int = 0
     warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SearchResult:
+    """One hybrid-retrieval hit with enough source context to inspect it."""
+
+    chunk_id: str
+    session_id: str
+    turn_id: str
+    chunk_index: int
+    text: str
+    score: float
+    vector_rank: int | None
+    lexical_rank: int | None
+    source_path: str
+    cwd: str | None
+    project: str
+    created_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ShowResult:
+    """A matched chunk and bounded neighboring turn context."""
+
+    chunk_id: str
+    session_id: str
+    source_path: str
+    cwd: str | None
+    project: str
+    matched_turn_id: str
+    turns: tuple[TurnRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseStatus:
+    """Schema, compatibility, and index counters for the local database."""
+
+    path: str
+    initialized: bool
+    schema_version: int | None
+    sqlite_vec_version: str | None
+    provider: str | None
+    model: str | None
+    model_digest: str | None
+    dimension: int | None
+    compatible: bool
+    sessions: int = 0
+    turns: int = 0
+    chunks: int = 0
+    missing_sessions: int = 0
+    warnings: int = 0
+    last_indexed_at: str | None = None
+    error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

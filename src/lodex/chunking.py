@@ -9,6 +9,7 @@ from lodex.contracts import ChunkRecord, TurnRecord
 
 DEFAULT_MAX_CHARS = 4_000
 DEFAULT_OVERLAP_CHARS = 400
+CHUNKING_VERSION = "1"
 
 
 @dataclass(frozen=True, slots=True)

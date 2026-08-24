@@ -236,7 +236,7 @@ class OllamaEmbedder:
         raw_inputs = list(texts)
         self._validate_inputs(raw_inputs)
         if not raw_inputs:
-            return self._empty_result(self._require_model_digest())
+            return self._result([], self._require_model_digest())
         digest = self._require_model_digest()
         vectors = self._embed_batches(raw_inputs)
         return self._result(vectors, digest)
@@ -304,46 +304,45 @@ class OllamaEmbedder:
         vectors: list[list[float]] = []
         for start in range(0, len(inputs), self.batch_size):
             batch = inputs[start : start + self.batch_size]
-            response = self._request_embed(batch)
-            raw_embeddings = _field(response, "embeddings", [])
-            if not isinstance(raw_embeddings, Sequence) or isinstance(raw_embeddings, str | bytes):
-                raise EmbeddingContractError("Ollama embed response has an invalid shape")
-            if len(raw_embeddings) != len(batch):
-                raise EmbeddingContractError(
-                    f"Ollama returned {len(raw_embeddings)} embeddings for {len(batch)} inputs"
-                )
-            for raw_vector in raw_embeddings:
-                if not isinstance(raw_vector, Sequence) or isinstance(raw_vector, str | bytes):
-                    raise EmbeddingContractError("Ollama returned a non-vector embedding")
-                vector = [float(value) for value in raw_vector]
+            for vector in self._parse_vectors(self._request_embed(batch), len(batch)):
                 if len(vector) != self.expected_dimension:
                     raise EmbeddingContractError(
                         f"Embedding dimension {len(vector)} does not match "
                         f"{self.expected_dimension}"
                     )
-                if not all(math.isfinite(value) for value in vector):
-                    raise EmbeddingContractError("Embedding contains a non-finite value")
                 vectors.append(vector)
         return vectors
 
     def _probe_dimension(self) -> int:
-        response = self._request_embed(["Lodex embedding dimension probe"])
+        vectors = self._parse_vectors(
+            self._request_embed(["Lodex embedding dimension probe"]),
+            1,
+        )
+        return len(vectors[0])
+
+    @staticmethod
+    def _parse_vectors(response: object, expected_count: int) -> list[list[float]]:
         raw_embeddings = _field(response, "embeddings", [])
         if not isinstance(raw_embeddings, Sequence) or isinstance(raw_embeddings, str | bytes):
             raise EmbeddingContractError("Ollama embed response has an invalid shape")
-        if len(raw_embeddings) != 1:
+        if len(raw_embeddings) != expected_count:
             raise EmbeddingContractError(
-                f"Ollama returned {len(raw_embeddings)} embeddings for 1 input"
+                f"Ollama returned {len(raw_embeddings)} embeddings for {expected_count} inputs"
             )
-        raw_vector = raw_embeddings[0]
-        if not isinstance(raw_vector, Sequence) or isinstance(raw_vector, str | bytes):
-            raise EmbeddingContractError("Ollama returned a non-vector embedding")
-        vector = [float(value) for value in raw_vector]
-        if not vector:
-            raise EmbeddingContractError("Ollama returned an empty embedding")
-        if not all(math.isfinite(value) for value in vector):
-            raise EmbeddingContractError("Embedding contains a non-finite value")
-        return len(vector)
+        vectors: list[list[float]] = []
+        for raw_vector in raw_embeddings:
+            if not isinstance(raw_vector, Sequence) or isinstance(raw_vector, str | bytes):
+                raise EmbeddingContractError("Ollama returned a non-vector embedding")
+            try:
+                vector = [float(value) for value in raw_vector]
+            except (TypeError, ValueError) as exc:
+                raise EmbeddingContractError("Ollama returned a non-numeric embedding") from exc
+            if not vector:
+                raise EmbeddingContractError("Ollama returned an empty embedding")
+            if not all(math.isfinite(value) for value in vector):
+                raise EmbeddingContractError("Embedding contains a non-finite value")
+            vectors.append(vector)
+        return vectors
 
     def _request_embed(self, inputs: Sequence[str]) -> object:
         for attempt in range(self.retry_count + 1):
@@ -378,9 +377,6 @@ class OllamaEmbedder:
             model_digest=digest,
             dimension=self.expected_dimension,
         )
-
-    def _empty_result(self, digest: str) -> EmbeddingResult:
-        return self._result([], digest)
 
     def _status_error(
         self,

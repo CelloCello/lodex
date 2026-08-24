@@ -6,8 +6,18 @@ from lodex.contracts import EmbeddingResult, OllamaStatus
 
 
 class FakeEmbedder:
-    def __init__(self, dimension: int = 3) -> None:
+    def __init__(
+        self,
+        dimension: int = 3,
+        *,
+        provider: str = "fake",
+        model: str = "fake",
+        digest: str = "fake-digest",
+    ) -> None:
         self.dimension = dimension
+        self.provider = provider
+        self.model = model
+        self.digest = digest
         self.document_calls: list[list[str]] = []
         self.query_calls: list[str] = []
 
@@ -25,9 +35,9 @@ class FakeEmbedder:
             host="fake://local",
             reachable=True,
             version="test",
-            model="fake",
+            model=self.model,
             model_installed=True,
-            model_digest="fake-digest",
+            model_digest=self.digest,
             dimension=self.dimension,
             expected_dimension=self.dimension,
             compatible=True,
@@ -37,8 +47,8 @@ class FakeEmbedder:
         vector = tuple(0.1 for _ in range(self.dimension))
         return EmbeddingResult(
             embeddings=tuple(vector for _ in range(count)),
-            provider="fake",
-            model="fake",
-            model_digest="fake-digest",
+            provider=self.provider,
+            model=self.model,
+            model_digest=self.digest,
             dimension=self.dimension,
         )
