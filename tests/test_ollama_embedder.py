@@ -10,6 +10,7 @@ from lodex.embedding import (
     QUERY_INSTRUCTION,
     EmbeddingConfigurationError,
     EmbeddingContractError,
+    EmbeddingError,
     ModelNotFoundError,
     OllamaEmbedder,
     OllamaUnavailableError,
@@ -17,8 +18,8 @@ from lodex.embedding import (
 
 
 class TransientResponseError(Exception):
-    def __init__(self, status_code: int) -> None:
-        super().__init__(f"HTTP {status_code}")
+    def __init__(self, status_code: int, message: str | None = None) -> None:
+        super().__init__(message or f"HTTP {status_code}")
         self.status_code = status_code
 
 
@@ -138,6 +139,53 @@ def test_timeout_after_retries_is_actionable() -> None:
 
     with pytest.raises(OllamaUnavailableError, match="slow"):
         embedder.embed_documents(["document"])
+
+
+def test_backend_reset_retries_then_splits_batch_without_reordering() -> None:
+    class ResetLargeBatchClient(FakeOllamaClient):
+        def embed(
+            self,
+            *,
+            model: str,
+            input: Sequence[str],
+            truncate: bool,
+            keep_alive: str,
+        ) -> object:
+            self.embed_calls.append(
+                {
+                    "model": model,
+                    "input": list(input),
+                    "truncate": truncate,
+                    "keep_alive": keep_alive,
+                }
+            )
+            if len(input) > 2:
+                raise TransientResponseError(400, "do embedding request: EOF")
+            return {
+                "embeddings": [
+                    [float(int(text.rsplit("-", maxsplit=1)[-1])), 0.0, 0.0] for text in input
+                ]
+            }
+
+    client = ResetLargeBatchClient()
+    sleeps: list[float] = []
+    embedder = make_embedder(client, batch_size=4, sleep=sleeps.append)
+
+    result = embedder.embed_documents([f"item-{index}" for index in range(4)])
+
+    assert [vector[0] for vector in result.embeddings] == [0.0, 1.0, 2.0, 3.0]
+    assert [len(call["input"]) for call in client.embed_calls] == [4, 4, 4, 2, 2]
+    assert sleeps == [0.1, 0.2]
+
+
+def test_non_reset_bad_request_is_not_retried_or_split() -> None:
+    client = FakeOllamaClient(failures=[TransientResponseError(400, "invalid input")])
+    embedder = make_embedder(client, batch_size=4, sleep=lambda _: None)
+
+    with pytest.raises(EmbeddingError, match="invalid input"):
+        embedder.embed_documents(["item-0", "item-1", "item-2", "item-3"])
+
+    assert len(client.embed_calls) == 1
 
 
 def test_dimension_mismatch_and_non_finite_values_fail() -> None:

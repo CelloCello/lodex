@@ -87,6 +87,15 @@ def test_modern_user_steering_is_accumulated_in_one_turn() -> None:
     assert session.turns[0].user_text == ("Implement the parser\n\nAlso preserve steering messages")
 
 
+def test_forked_session_normalizes_parent_turns_to_canonical_session_id() -> None:
+    session = parse_codex_session(FIXTURES / "forked-session.jsonl")
+
+    assert session.session_id == "child-session"
+    assert session.created_at == "2026-08-21T01:00:00Z"
+    assert [turn.turn_id for turn in session.turns] == ["parent-turn", "child-turn"]
+    assert {turn.session_id for turn in session.turns} == {"child-session"}
+
+
 def test_archived_path_is_normalized_as_archived() -> None:
     session = parse_codex_session(FIXTURES / "archived_sessions" / "archived.jsonl")
 

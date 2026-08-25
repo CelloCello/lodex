@@ -29,7 +29,7 @@ def fts_query(text: str) -> str:
 
 
 class Retrieval:
-    """Run mandatory semantic and lexical retrieval, then merge with RRF."""
+    """Run hybrid retrieval, or an explicitly requested lexical-only search."""
 
     def __init__(self, storage: Storage, embedder: Embedder) -> None:
         self.storage = storage
@@ -43,6 +43,7 @@ class Retrieval:
         since: str | None = None,
         until: str | None = None,
         limit: int = 10,
+        lexical_only: bool = False,
     ) -> tuple[SearchResult, ...]:
         if not query.strip():
             raise RetrievalError("Search query must not be empty")
@@ -56,18 +57,20 @@ class Retrieval:
         except DateRangeError as exc:
             raise RetrievalError(str(exc)) from exc
 
-        embedding = self.embedder.embed_query(query)
-        self.storage.validate_query_embedding(embedding)
-        if len(embedding.embeddings) != 1:
-            raise RetrievalError("Query embedder did not return exactly one vector")
+        vector_rows: Sequence[Mapping[str, Any]] = ()
+        if not lexical_only:
+            embedding = self.embedder.embed_query(query)
+            self.storage.validate_query_embedding(embedding)
+            if len(embedding.embeddings) != 1:
+                raise RetrievalError("Query embedder did not return exactly one vector")
 
-        vector_rows = self.storage.vector_candidates(
-            embedding.embeddings[0],
-            limit=DEFAULT_CANDIDATES,
-            project=project,
-            since=normalized_since,
-            until=normalized_until,
-        )
+            vector_rows = self.storage.vector_candidates(
+                embedding.embeddings[0],
+                limit=DEFAULT_CANDIDATES,
+                project=project,
+                since=normalized_since,
+                until=normalized_until,
+            )
         lexical = fts_query(query)
         lexical_rows = (
             self.storage.lexical_candidates(

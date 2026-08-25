@@ -10,7 +10,12 @@ from pathlib import Path
 from lodex.chunking import chunk_turn
 from lodex.codex_parser import parse_codex_session
 from lodex.contracts import Embedder, IndexSummary, SessionRecord
-from lodex.dates import DateRangeError, normalize_date_range, timestamp_in_range
+from lodex.dates import (
+    DateRangeError,
+    normalize_date_filter,
+    normalize_date_range,
+    timestamp_in_range,
+)
 from lodex.projects import project_identity
 from lodex.storage import Storage
 
@@ -37,6 +42,51 @@ def discover_session_files(roots: Sequence[Path]) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(path.resolve() for path in files))
 
 
+def session_file_header(path: Path) -> tuple[str | None, str | None]:
+    """Read the first session_meta identity and timestamp from one transcript."""
+
+    with path.open("r", encoding="utf-8") as transcript:
+        for raw_line in transcript:
+            try:
+                record = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(record, Mapping) or record.get("type") != "session_meta":
+                continue
+            payload_value = record.get("payload")
+            payload = payload_value if isinstance(payload_value, Mapping) else {}
+            identity = payload.get("id") or payload.get("session_id")
+            timestamp = payload.get("timestamp") or record.get("timestamp")
+            return (
+                identity.strip() if isinstance(identity, str) and identity.strip() else None,
+                timestamp.strip() if isinstance(timestamp, str) and timestamp.strip() else None,
+            )
+    return None, None
+
+
+def select_canonical_session_files(paths: Sequence[Path]) -> tuple[Path, ...]:
+    """Choose the newest snapshot for each logical session identity."""
+
+    selected: dict[str, tuple[tuple[str, int, str], Path]] = {}
+    for path in paths:
+        try:
+            identity, created_at = session_file_header(path)
+            try:
+                normalized_created_at = normalize_date_filter(created_at) or ""
+            except DateRangeError:
+                normalized_created_at = ""
+            rank = (normalized_created_at, path.stat().st_mtime_ns, str(path))
+        except OSError:
+            identity = None
+            rank = ("", 0, str(path))
+        key = identity or f"path:{path}"
+        previous = selected.get(key)
+        if previous is None or rank > previous[0]:
+            selected[key] = (rank, path)
+    chosen = {path for _, path in selected.values()}
+    return tuple(path for path in paths if path in chosen)
+
+
 def resolve_session_target(target: str, roots: Sequence[Path]) -> Path:
     """Resolve an explicit JSONL path or a Codex thread/session identifier."""
 
@@ -46,7 +96,11 @@ def resolve_session_target(target: str, roots: Sequence[Path]) -> Path:
             raise IndexingError(f"Session target is not a file: {candidate}")
         return candidate.resolve()
 
-    matches = [path for path in discover_session_files(roots) if target in path.name]
+    matches = list(
+        select_canonical_session_files(
+            [path for path in discover_session_files(roots) if target in path.name]
+        )
+    )
     if not matches:
         raise IndexingError(f"No Codex session matches {target!r}")
     if len(matches) > 1:
@@ -60,19 +114,7 @@ def resolve_session_target(target: str, roots: Sequence[Path]) -> Path:
 def session_created_at(path: Path) -> str | None:
     """Read only enough JSONL records to find the canonical session timestamp."""
 
-    with path.open("r", encoding="utf-8") as transcript:
-        for raw_line in transcript:
-            try:
-                record = json.loads(raw_line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(record, Mapping) or record.get("type") != "session_meta":
-                continue
-            payload_value = record.get("payload")
-            payload = payload_value if isinstance(payload_value, Mapping) else {}
-            value = payload.get("timestamp") or record.get("timestamp")
-            return value if isinstance(value, str) and value.strip() else None
-    return None
+    return session_file_header(path)[1]
 
 
 def filter_session_files(
@@ -136,7 +178,7 @@ class Indexer:
         paths = (
             (resolve_session_target(target, self.roots),)
             if target is not None
-            else discover_session_files(self.roots)
+            else select_canonical_session_files(discover_session_files(self.roots))
         )
         date_warnings: tuple[str, ...] = ()
         if normalized_since is not None or normalized_until is not None:
@@ -164,19 +206,16 @@ class Indexer:
         seen_paths = {str(path) for path in paths}
 
         for current, path in enumerate(paths, start=1):
+            processed_path = path
             try:
-                initial_stat = path.stat()
-                stored = self.storage.get_session_by_path(str(path))
-                if (
-                    stored is not None
-                    and not stored.missing
-                    and stored.file_size == initial_stat.st_size
-                    and stored.file_mtime_ns == initial_stat.st_mtime_ns
-                ):
+                processed_path, session, final_size, final_mtime_ns = self._load_session(path)
+                if processed_path != path:
+                    seen_paths.discard(str(path))
+                    seen_paths.add(str(processed_path))
+                if session is None:
                     unchanged_sessions += 1
                     continue
 
-                session, final_size, final_mtime_ns = self._parse_stable(path, initial_stat)
                 parsed_sessions += 1
                 chunks = tuple(chunk for turn in session.turns for chunk in chunk_turn(turn))
                 existing_ids = self.storage.existing_chunk_ids(session.session_id)
@@ -198,15 +237,15 @@ class Indexer:
                 indexed_turns += len(session.turns)
                 embedded_chunks += len(new_chunks)
                 warnings.extend(
-                    f"{path}:{warning.line_number}:{warning.code}: {warning.message}"
+                    f"{processed_path}:{warning.line_number}:{warning.code}: {warning.message}"
                     for warning in session.warnings
                 )
             except Exception as exc:
                 failed_sessions += 1
-                warnings.append(f"{path}: {str(exc) or exc.__class__.__name__}")
+                warnings.append(f"{processed_path}: {str(exc) or exc.__class__.__name__}")
             finally:
                 if self.progress is not None:
-                    self.progress(current, len(paths), path)
+                    self.progress(current, len(paths), processed_path)
 
         missing_sessions = 0
         pruned_sessions = 0
@@ -237,6 +276,52 @@ class Indexer:
             pruned_sessions=pruned_sessions,
             warnings=tuple(warnings),
         )
+
+    def _load_session(
+        self,
+        path: Path,
+    ) -> tuple[Path, SessionRecord | None, int, int]:
+        """Read one session, following a single active-to-archived move."""
+
+        current = path
+        for attempt in range(2):
+            try:
+                initial_stat = current.stat()
+                stored = self.storage.get_session_by_path(str(current))
+                if (
+                    stored is not None
+                    and not stored.missing
+                    and stored.file_size == initial_stat.st_size
+                    and stored.file_mtime_ns == initial_stat.st_mtime_ns
+                ):
+                    return current, None, initial_stat.st_size, initial_stat.st_mtime_ns
+
+                session, final_size, final_mtime_ns = self._parse_stable(current, initial_stat)
+                return current, session, final_size, final_mtime_ns
+            except FileNotFoundError:
+                relocated = self._relocated_path(current)
+                if attempt > 0 or relocated is None:
+                    raise
+                current = relocated
+
+        raise AssertionError("session relocation retry exhausted")
+
+    def _relocated_path(self, missing_path: Path) -> Path | None:
+        matches = [
+            candidate.resolve()
+            for root in self.roots
+            if root.is_dir()
+            for candidate in root.rglob(missing_path.name)
+            if candidate.resolve() != missing_path
+        ]
+        canonical = select_canonical_session_files(tuple(dict.fromkeys(matches)))
+        if not canonical:
+            return None
+        if len(canonical) > 1:
+            raise IndexingError(
+                f"Session moved from {missing_path}, but its new location is ambiguous"
+            )
+        return canonical[0]
 
     @staticmethod
     def _parse_stable(

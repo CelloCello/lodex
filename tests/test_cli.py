@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -147,3 +148,25 @@ def test_ollama_unavailable_does_not_fall_back_to_lexical_search(
     assert cli.main(["search", "parser", "--json"]) == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["error"] == "runtime stopped"
+
+    assert cli.main(["search", "parser", "--lexical", "--json"]) == 0
+    lexical = json.loads(capsys.readouterr().out)
+    assert lexical["mode"] == "lexical"
+    assert lexical["count"] == 1
+    assert lexical["results"][0]["vector_rank"] is None
+
+
+def test_sqlite_error_is_rendered_as_json_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_cli(monkeypatch, tmp_path)
+
+    def unavailable_storage(*_: object, **__: object) -> object:
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(cli, "Storage", unavailable_storage)
+    assert cli.main(["show", "missing", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "unable to open database file"

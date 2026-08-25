@@ -36,6 +36,10 @@ class OllamaUnavailableError(EmbeddingError):
     """The local Ollama runtime could not serve a request."""
 
 
+class OllamaBackendResetError(OllamaUnavailableError):
+    """The Ollama model runner reset while serving an otherwise valid request."""
+
+
 class ModelNotFoundError(EmbeddingError):
     """The configured embedding model is not installed."""
 
@@ -304,7 +308,7 @@ class OllamaEmbedder:
         vectors: list[list[float]] = []
         for start in range(0, len(inputs), self.batch_size):
             batch = inputs[start : start + self.batch_size]
-            for vector in self._parse_vectors(self._request_embed(batch), len(batch)):
+            for vector in self._embed_batch(batch):
                 if len(vector) != self.expected_dimension:
                     raise EmbeddingContractError(
                         f"Embedding dimension {len(vector)} does not match "
@@ -312,6 +316,15 @@ class OllamaEmbedder:
                     )
                 vectors.append(vector)
         return vectors
+
+    def _embed_batch(self, inputs: Sequence[str]) -> list[list[float]]:
+        try:
+            return self._parse_vectors(self._request_embed(inputs), len(inputs))
+        except OllamaBackendResetError:
+            if len(inputs) == 1:
+                raise
+            midpoint = len(inputs) // 2
+            return self._embed_batch(inputs[:midpoint]) + self._embed_batch(inputs[midpoint:])
 
     def _probe_dimension(self) -> int:
         vectors = self._parse_vectors(
@@ -357,6 +370,8 @@ class OllamaEmbedder:
                 if attempt < self.retry_count and self._is_transient(exc):
                     self._sleep(self.retry_base_seconds * (2**attempt))
                     continue
+                if self._is_backend_reset(exc):
+                    raise OllamaBackendResetError(self._error_text(exc)) from exc
                 if self._is_transient(exc) or isinstance(exc, ConnectionError | TimeoutError):
                     raise OllamaUnavailableError(self._error_text(exc)) from exc
                 raise EmbeddingError(self._error_text(exc)) from exc
@@ -365,8 +380,19 @@ class OllamaEmbedder:
     @staticmethod
     def _is_transient(exc: Exception) -> bool:
         status_code = getattr(exc, "status_code", None)
-        return isinstance(exc, TimeoutError | httpx.TimeoutException) or (
-            isinstance(status_code, int) and 500 <= status_code < 600
+        return (
+            isinstance(exc, TimeoutError | httpx.TimeoutException)
+            or (isinstance(status_code, int) and 500 <= status_code < 600)
+            or OllamaEmbedder._is_backend_reset(exc)
+        )
+
+    @staticmethod
+    def _is_backend_reset(exc: Exception) -> bool:
+        if getattr(exc, "status_code", None) != 400:
+            return False
+        message = OllamaEmbedder._error_text(exc).lower()
+        return any(
+            marker in message for marker in ("connection reset by peer", "eof", "health resp:")
         )
 
     def _result(self, vectors: Sequence[Sequence[float]], digest: str) -> EmbeddingResult:

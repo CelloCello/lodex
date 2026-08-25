@@ -162,6 +162,20 @@ def test_project_date_filters_and_empty_results(tmp_path: Path) -> None:
         assert empty == ()
 
 
+def test_explicit_lexical_search_does_not_call_embedder(tmp_path: Path) -> None:
+    with Storage(tmp_path / "lodex.db", dimension=3) as storage:
+        chunk_ids = build_corpus(storage, tmp_path)
+        embedder = QueryEmbedder({})
+        retrieval = Retrieval(storage, embedder)
+
+        results = retrieval.search("StorageCompatibilityError", lexical_only=True)
+
+        assert results[0].chunk_id == chunk_ids["a"][0]
+        assert results[0].vector_rank is None
+        assert results[0].lexical_rank == 1
+        assert embedder.query_calls == []
+
+
 def test_filtered_vector_search_expands_past_global_candidate_pool(tmp_path: Path) -> None:
     with Storage(tmp_path / "lodex.db", dimension=3) as storage:
         decoys, decoy_project = session(

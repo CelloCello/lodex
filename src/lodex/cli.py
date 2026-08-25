@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict
@@ -22,6 +23,7 @@ from lodex.embedding import (
 from lodex.indexer import Indexer, IndexingError, IndexRuntimeError
 from lodex.projects import project_identity
 from lodex.retrieval import Retrieval, RetrievalError, show_context
+from lodex.skill_install import install_skill, remove_skill
 from lodex.storage import (
     Storage,
     StorageCompatibilityError,
@@ -57,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--since")
     search_parser.add_argument("--until")
     search_parser.add_argument("--limit", type=int, default=10)
+    search_parser.add_argument(
+        "--lexical",
+        action="store_true",
+        help="search with SQLite FTS only, without contacting Ollama",
+    )
     search_parser.add_argument("--json", action="store_true", dest="as_json")
 
     show_parser = commands.add_parser("show", help="show a hit with neighboring turns")
@@ -70,6 +77,13 @@ def build_parser() -> argparse.ArgumentParser:
     rebuild_parser = commands.add_parser("rebuild", help="reset the local index")
     rebuild_parser.add_argument("--yes", action="store_true")
     rebuild_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    skill_parser = commands.add_parser("skill", help="manage the bundled Codex skill")
+    skill_commands = skill_parser.add_subparsers(dest="skill_command", required=True)
+    install_parser = skill_commands.add_parser("install", help="install or update lodex-history")
+    install_parser.add_argument("--dry-run", action="store_true")
+    remove_parser = skill_commands.add_parser("remove", help="remove lodex-history")
+    remove_parser.add_argument("--dry-run", action="store_true")
     return parser
 
 
@@ -143,11 +157,18 @@ def _resolved_project(value: str | None) -> str | None:
     return project_identity(value)
 
 
-def _print_search(results: Sequence[SearchResult], *, query: str, as_json: bool) -> None:
+def _print_search(
+    results: Sequence[SearchResult],
+    *,
+    query: str,
+    mode: str,
+    as_json: bool,
+) -> None:
     if as_json:
         _print_json(
             {
                 "count": len(results),
+                "mode": mode,
                 "query": query,
                 "results": [asdict(result) for result in results],
             }
@@ -220,6 +241,34 @@ def _index_progress(current: int, total: int, path: Path) -> None:
         print(f"indexing [{current}/{total}] {path.name}", file=sys.stderr)
 
 
+def _run_skill(args: argparse.Namespace) -> int:
+    command = str(args.skill_command)
+    if command == "install":
+        result = install_skill(dry_run=bool(args.dry_run))
+    elif command == "remove":
+        result = remove_skill(dry_run=bool(args.dry_run))
+    else:
+        raise AssertionError(f"Unhandled skill command: {command}")
+
+    if result.state == "would-install":
+        print(f"Would install lodex-history to {result.path}")
+    elif result.state == "would-update":
+        print(f"Would update lodex-history at {result.path}")
+    elif result.state == "would-remove":
+        print(f"Would remove lodex-history from {result.path}")
+    elif result.state == "unchanged":
+        print(f"lodex-history is already up to date at {result.path}")
+    elif result.state == "not-installed":
+        print(f"lodex-history is not installed at {result.path}")
+    elif result.state == "updated":
+        print(f"Updated lodex-history at {result.path}")
+    elif result.state == "removed":
+        print(f"Removed lodex-history from {result.path}")
+    else:
+        print(f"Installed lodex-history to {result.path}")
+    return 0
+
+
 def _run(args: argparse.Namespace, config: AppConfig) -> int:
     as_json = _as_json(args)
     command = str(args.command)
@@ -260,7 +309,11 @@ def _run(args: argparse.Namespace, config: AppConfig) -> int:
         return 1 if summary.failed_sessions else 0
 
     if command == "search":
-        with Storage(config.db_path, dimension=config.embedding_dimension) as storage:
+        with Storage(
+            config.db_path,
+            dimension=config.embedding_dimension,
+            read_only=True,
+        ) as storage:
             retrieval = Retrieval(storage, _embedder(config))
             results = retrieval.search(
                 args.query,
@@ -268,12 +321,22 @@ def _run(args: argparse.Namespace, config: AppConfig) -> int:
                 since=args.since,
                 until=args.until,
                 limit=args.limit,
+                lexical_only=bool(args.lexical),
             )
-            _print_search(results, query=args.query, as_json=as_json)
+            _print_search(
+                results,
+                query=args.query,
+                mode="lexical" if args.lexical else "hybrid",
+                as_json=as_json,
+            )
         return 0
 
     if command == "show":
-        with Storage(config.db_path, dimension=config.embedding_dimension) as storage:
+        with Storage(
+            config.db_path,
+            dimension=config.embedding_dimension,
+            read_only=True,
+        ) as storage:
             result = show_context(storage, args.chunk_id, context=args.context)
             _print_show(result, as_json=as_json)
         return 0
@@ -292,6 +355,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     as_json = _as_json(args)
     command = str(args.command)
     try:
+        if command == "skill":
+            return _run_skill(args)
         config = load_config()
         return _run(args, config)
     except (
@@ -307,6 +372,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (
         EmbeddingError,
         IndexRuntimeError,
+        sqlite3.Error,
         StorageCompatibilityError,
         StorageError,
         OSError,

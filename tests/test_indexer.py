@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from lodex.contracts import EmbeddingResult
+from lodex import indexer as indexer_module
+from lodex.codex_parser import parse_codex_session
+from lodex.contracts import EmbeddingResult, SessionRecord
 from lodex.dates import DateRangeError
 from lodex.indexer import Indexer, IndexingError
 from lodex.storage import Storage, StorageCompatibilityError
@@ -68,6 +70,108 @@ def test_active_to_archived_move_does_not_reembed(tmp_path: Path) -> None:
         ).fetchone()
         assert row["source_path"] == str(archived_source.resolve())
         assert (row["archived"], row["missing"]) == (1, 0)
+    finally:
+        storage.close()
+
+
+def test_move_after_discovery_is_followed_without_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeEmbedder(dimension=3)
+    storage, indexer, active, archived = make_indexer(tmp_path, fake)
+    source = active / "completed.jsonl"
+    archived_source = archived / source.name
+    shutil.copy2(FIXTURES / "completed.jsonl", source)
+    original_select = indexer_module.select_canonical_session_files
+    moved = False
+
+    def select_then_move(paths: Sequence[Path]) -> tuple[Path, ...]:
+        nonlocal moved
+        selected = original_select(paths)
+        if not moved:
+            source.replace(archived_source)
+            moved = True
+        return selected
+
+    monkeypatch.setattr(indexer_module, "select_canonical_session_files", select_then_move)
+    try:
+        summary = indexer.index()
+        row = storage.connection.execute(
+            "SELECT source_path, archived, missing FROM sessions"
+        ).fetchone()
+
+        assert summary.failed_sessions == 0
+        assert summary.embedded_chunks == 1
+        assert row["source_path"] == str(archived_source.resolve())
+        assert (row["archived"], row["missing"]) == (1, 0)
+    finally:
+        storage.close()
+
+
+def test_move_during_parse_is_followed_without_duplicate_embedding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeEmbedder(dimension=3)
+    storage, indexer, active, archived = make_indexer(tmp_path, fake)
+    source = active / "completed.jsonl"
+    archived_source = archived / source.name
+    shutil.copy2(FIXTURES / "completed.jsonl", source)
+    original_parse = parse_codex_session
+
+    def parse_then_move(path: Path) -> SessionRecord:
+        session = original_parse(path)
+        if path == source:
+            source.replace(archived_source)
+        return session
+
+    monkeypatch.setattr(indexer_module, "parse_codex_session", parse_then_move)
+    try:
+        summary = indexer.index()
+        row = storage.connection.execute(
+            "SELECT source_path, archived, missing FROM sessions"
+        ).fetchone()
+
+        assert summary.failed_sessions == 0
+        assert summary.embedded_chunks == 1
+        assert len(fake.document_calls) == 1
+        assert row["source_path"] == str(archived_source.resolve())
+        assert (row["archived"], row["missing"]) == (1, 0)
+    finally:
+        storage.close()
+
+
+def test_duplicate_session_snapshots_use_latest_source_and_rerun_unchanged(
+    tmp_path: Path,
+) -> None:
+    fake = FakeEmbedder(dimension=3)
+    storage, indexer, active, _ = make_indexer(tmp_path, fake)
+    original = (FIXTURES / "completed.jsonl").read_text(encoding="utf-8")
+    older = active / "older.jsonl"
+    newer = active / "newer.jsonl"
+    older.write_text(original, encoding="utf-8")
+    newer.write_text(
+        original.replace("2026-08-20T01:00:00Z", "2026-08-21T01:00:00Z").replace(
+            "It normalizes safe transcript turns.",
+            "The latest snapshot adds FTS.",
+        ),
+        encoding="utf-8",
+    )
+    try:
+        first = indexer.index()
+        second = indexer.index()
+        row = storage.connection.execute(
+            "SELECT source_path FROM sessions WHERE session_id = 'session-completed'"
+        ).fetchone()
+        text = storage.connection.execute("SELECT text FROM chunks").fetchone()[0]
+
+        assert first.scanned_sessions == 1
+        assert row["source_path"] == str(newer.resolve())
+        assert text.endswith("The latest snapshot adds FTS.")
+        assert second.unchanged_sessions == 1
+        assert second.embedded_chunks == 0
+        assert len(fake.document_calls) == 1
     finally:
         storage.close()
 

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
 
 from lodex.chunking import chunk_turn
 from lodex.contracts import EmbeddingResult, SessionRecord, TurnRecord
-from lodex.storage import Storage, StorageCompatibilityError
+from lodex.storage import Storage, StorageCompatibilityError, StorageError
 
 
 def make_session(source: Path, *, answer: str = "Stored answer") -> SessionRecord:
@@ -132,3 +133,39 @@ def test_embedding_compatibility_requires_explicit_rebuild(tmp_path: Path) -> No
         storage.reset()
         assert storage.status().chunks == 0
         assert storage.status().model_digest is None
+
+
+def test_read_only_storage_queries_existing_index_without_mutating_it(tmp_path: Path) -> None:
+    database = tmp_path / "lodex.db"
+    source = tmp_path / "session.jsonl"
+    source.write_text("fixture", encoding="utf-8")
+    session = make_session(source)
+    chunks = tuple(chunk_turn(session.turns[0]))
+    with Storage(database, dimension=3) as storage:
+        storage.replace_session(
+            session,
+            chunks,
+            chunks,
+            embedding(1),
+            file_size=7,
+            file_mtime_ns=1,
+            project="path:/project",
+        )
+
+    modified_at = database.stat().st_mtime_ns
+    with Storage(database, dimension=3, read_only=True) as storage:
+        assert storage.status().chunks == 1
+        assert storage.lexical_candidates('"StorageCompatibilityError"', limit=5)
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            storage.connection.execute("DELETE FROM sessions")
+    assert database.stat().st_mtime_ns == modified_at
+
+
+def test_read_only_storage_does_not_create_a_missing_database(tmp_path: Path) -> None:
+    database = tmp_path / "missing" / "lodex.db"
+
+    with pytest.raises(StorageError, match="Cannot open Lodex database"):
+        Storage(database, dimension=3, read_only=True)
+
+    assert not database.exists()
+    assert not database.parent.exists()

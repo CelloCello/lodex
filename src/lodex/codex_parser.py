@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -121,6 +121,7 @@ class CodexSessionParser:
         session_id = self._session_id_from_path(path)
         created_at: str | None = None
         cwd: str | None = None
+        has_session_meta = False
         turns: list[TurnRecord] = []
         current: _TurnBuilder | None = None
         unknown_warning_keys: set[tuple[str, str]] = set()
@@ -197,6 +198,8 @@ class CodexSessionParser:
                 payload = payload_value if isinstance(payload_value, Mapping) else {}
 
                 if record_type == "session_meta":
+                    if has_session_meta:
+                        continue
                     candidate_id = _text(payload.get("id")) or _text(payload.get("session_id"))
                     if candidate_id:
                         session_id = candidate_id
@@ -206,6 +209,7 @@ class CodexSessionParser:
                         value = _text(payload.get(key))
                         if value:
                             metadata[key] = value
+                    has_session_meta = True
                     continue
 
                 if record_type == "turn_context":
@@ -313,7 +317,7 @@ class CodexSessionParser:
             created_at=created_at,
             cwd=cwd,
             archived="archived_sessions" in path.parts,
-            turns=tuple(turns),
+            turns=tuple(replace(turn, session_id=session_id) for turn in turns),
             warnings=tuple(warnings),
             metadata=metadata,
         )

@@ -62,31 +62,54 @@ class Storage(AbstractContextManager["Storage"]):
         path: str | Path,
         *,
         dimension: int,
+        read_only: bool = False,
         _reset_existing: bool = False,
     ) -> None:
         if dimension <= 0:
             raise StorageCompatibilityError("Embedding dimension must be positive")
+        if read_only and _reset_existing:
+            raise StorageError("Cannot reset a read-only database")
         self.path = Path(path).expanduser().resolve()
         self.dimension = dimension
-        self._prepare_path()
-        self.connection = sqlite3.connect(self.path)
-        self.connection.row_factory = sqlite3.Row
-        self.connection.execute("PRAGMA foreign_keys = ON")
-        self.connection.execute("PRAGMA journal_mode = WAL")
-        self.connection.execute("PRAGMA synchronous = NORMAL")
         try:
-            self.connection.enable_load_extension(True)
-            sqlite_vec.load(self.connection)
-        finally:
-            self.connection.enable_load_extension(False)
-        try:
+            if read_only:
+                self.connection = sqlite3.connect(f"{self.path.as_uri()}?mode=ro", uri=True)
+            else:
+                self._prepare_path()
+                self.connection = sqlite3.connect(self.path)
+            self.connection.row_factory = sqlite3.Row
+            self.connection.execute("PRAGMA foreign_keys = ON")
+            if read_only:
+                self.connection.execute("PRAGMA query_only = ON")
+            else:
+                self.connection.execute("PRAGMA journal_mode = WAL")
+                self.connection.execute("PRAGMA synchronous = NORMAL")
+            try:
+                self.connection.enable_load_extension(True)
+                sqlite_vec.load(self.connection)
+            finally:
+                self.connection.enable_load_extension(False)
             if _reset_existing:
                 self.reset()
+            elif read_only:
+                self._validate_existing()
             else:
                 self._migrate()
-        except Exception:
-            self.close()
+        except StorageError:
+            if hasattr(self, "connection"):
+                self.close()
             raise
+        except sqlite3.Error as exc:
+            if hasattr(self, "connection"):
+                self.close()
+            raise StorageError(f"Cannot open Lodex database {self.path}: {exc}") from exc
+        except Exception as exc:
+            if hasattr(self, "connection"):
+                self.close()
+            raise StorageError(
+                f"Cannot initialize Lodex database {self.path}: "
+                f"{str(exc) or exc.__class__.__name__}"
+            ) from exc
 
     @classmethod
     def rebuild(cls, path: str | Path, *, dimension: int) -> None:
@@ -127,6 +150,28 @@ class Storage(AbstractContextManager["Storage"]):
         self._ensure_schema_metadata()
         stored_dimension = self.get_metadata("embedding_dimension")
         if stored_dimension is not None and int(stored_dimension) != self.dimension:
+            raise StorageCompatibilityError(
+                f"Database dimension {stored_dimension} does not match {self.dimension}"
+            )
+
+    def _validate_existing(self) -> None:
+        version = int(self.connection.execute("PRAGMA user_version").fetchone()[0])
+        if version == 0:
+            raise StorageCompatibilityError(
+                f"Database at {self.path} is not initialized; run lodex index first"
+            )
+        if version > SCHEMA_VERSION:
+            raise StorageCompatibilityError(
+                f"Database schema {version} is newer than supported schema {SCHEMA_VERSION}"
+            )
+        if version < SCHEMA_VERSION:
+            raise StorageCompatibilityError(
+                f"Database schema {version} requires migration; run lodex index first"
+            )
+        stored_dimension = self.get_metadata("embedding_dimension")
+        if stored_dimension is None:
+            raise StorageCompatibilityError("Database embedding dimension metadata is missing")
+        if int(stored_dimension) != self.dimension:
             raise StorageCompatibilityError(
                 f"Database dimension {stored_dimension} does not match {self.dimension}"
             )
@@ -783,7 +828,7 @@ def database_status(
             compatible=True,
         )
     try:
-        with Storage(resolved, dimension=dimension) as storage:
+        with Storage(resolved, dimension=dimension, read_only=True) as storage:
             return storage.status(provider=provider, model=model, digest=digest)
     except Exception as exc:
         return DatabaseStatus(

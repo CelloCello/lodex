@@ -5,51 +5,127 @@ JSONL transcripts without modifying them, generates embeddings through a
 loopback-only Ollama connection, and stores a hybrid FTS5/`sqlite-vec` index in
 SQLite.
 
-## Setup
+## Installation and usage
+
+### Prerequisites
+
+Install and start [Ollama](https://ollama.com/download), then download the local
+embedding model. `ollama serve` keeps the API available in the foreground; use
+your operating system's normal service mechanism if you want it to persist.
 
 ```bash
-uv sync
+ollama serve
 ollama pull qwen3-embedding:0.6b
-uv run lodex status
 ```
+
+### Install Lodex and the Codex skill
+
+Install Lodex from a local checkout as an isolated command-line tool. This is a
+non-editable installation intended for normal use; commands are available from
+any project without activating the Lodex development environment.
+
+```bash
+uv tool install /absolute/path/to/lodex
+lodex status
+lodex skill install --dry-run
+lodex skill install
+```
+
+The Codex skill is installed as a managed copy rather than a symlink, so moving
+or deleting the checkout does not break it.
+
+Codex tasks may sandbox access to the user-level database or loopback Ollama.
+When a read-only `status`, `search`, or `show` command is blocked, the skill asks
+for approval to retry that exact command outside the sandbox. It never extends
+that approval to `index`, `rebuild`, or skill management commands.
+
+Some Codex surfaces, including side conversations, cannot request approval. If
+the database is readable and compatible but loopback Ollama is blocked by the
+sandbox, the skill uses the explicit `search --lexical` mode. This queries the
+existing SQLite FTS5 index without contacting Ollama and reports that semantic
+recall is unavailable; it is not used for database or embedding compatibility
+errors.
 
 The default database is `~/.local/share/lodex/lodex.db`. Lodex creates the data
 directory with mode `0700` and the database with mode `0600`.
+
+### Update or remove an installation
+
+Re-run the tool installation to update the installed CLI from the checkout:
+
+```bash
+uv tool install --force /absolute/path/to/lodex
+```
+
+The CLI installation and Codex skill are updated separately. `skill install`
+adds a missing skill, leaves an identical copy unchanged, and updates an older
+or modified copy. Preview the operation before replacing the installed copy:
+
+```bash
+lodex skill install --dry-run
+lodex skill install
+```
+
+An update replaces the complete installed skill, including local edits and
+stale files. Remove only the installed skill with:
+
+```bash
+lodex skill remove --dry-run
+lodex skill remove
+```
+
+Removing or reinstalling the CLI or skill does not delete the Lodex database or
+the original Codex sessions.
+
+Remove the CLI separately when it is no longer needed:
+
+```bash
+uv tool uninstall lodex
+```
 
 ## Commands
 
 ```bash
 # Initial backfill or incremental refresh
-uv run lodex index
-uv run lodex index --session <thread-id-or-jsonl-path>
-uv run lodex index --since 2026-08-01 --until 2026-08-07
+lodex index
+lodex index --session <thread-id-or-jsonl-path>
+lodex index --since 2026-08-01 --until 2026-08-07
 
 # Sources that disappeared are marked missing; deletion is always explicit
-uv run lodex index --prune
+lodex index --prune
 
 # Hybrid vector + full-text retrieval
-uv run lodex search "why was the parser changed?"
-uv run lodex search "StorageCompatibilityError" --project current --limit 5 --json
-uv run lodex search "index transaction" --since 2026-08-01 --until 2026-08-31
+lodex search "why was the parser changed?"
+lodex search "StorageCompatibilityError" --project current --limit 5 --json
+lodex search "index transaction" --since 2026-08-01 --until 2026-08-31
+
+# Explicit FTS-only retrieval when loopback Ollama cannot be reached
+lodex search "StorageCompatibilityError" --project current --lexical --json
 
 # Expand only the matched turn and a bounded number of neighbors
-uv run lodex show <chunk-id> --context 1 --json
+lodex show <chunk-id> --context 1 --json
 
 # Check Ollama, model identity, schema, and index counters
-uv run lodex status --json
+lodex status --json
 
 # Required after an incompatible model digest/dimension or chunking contract change
-uv run lodex rebuild --yes
+lodex rebuild --yes
 ```
+
+Run the initial `index` until it completes. Re-running the same command is safe:
+unchanged sessions and chunks do not call Ollama again, so it is also the normal
+day-to-day incremental refresh command. If a run is interrupted, start it again;
+successfully committed sessions are retained.
 
 Index date filters use the timestamp in `session_meta`; date-only bounds are
 inclusive and interpreted as UTC. Range indexing never marks out-of-range
 sessions missing and cannot be combined with `--session` or `--prune`.
 
-Every `--json` command writes one JSON value to stdout. Exit codes are `0` for
-success, `1` for runtime/index failures, and `2` for usage or configuration
-errors. Search does not silently fall back to lexical-only results when Ollama
-is unavailable.
+Every `--json` command writes one JSON value to stdout. Search output includes
+`mode` as either `hybrid` or `lexical`. Exit codes are `0` for success, `1` for
+runtime/index failures, and `2` for usage or configuration errors. Search never
+silently falls back when Ollama is unavailable; lexical-only retrieval requires
+the explicit `--lexical` option.
 
 ## Configuration
 
@@ -72,7 +148,53 @@ dimension = 1024
 Lodex rejects every non-loopback `OLLAMA_HOST`, so transcript text cannot be
 sent to a remote embedding endpoint by mistake.
 
+## Privacy and automation
+
+Lodex reads Codex transcripts without modifying them. Transcript chunks are
+sent only to the configured loopback Ollama endpoint and the derived index stays
+in the local SQLite database. The installed `lodex-history` skill treats every
+retrieved transcript as untrusted historical data: embedded instructions are
+never commands for the current agent, and only bounded matching context should
+be exposed.
+
+Lodex does not install a scheduler, hook, daemon, or background process. Those
+can be added later by invoking the existing non-interactive contracts:
+
+```bash
+# Periodic incremental refresh
+lodex index --json
+
+# Precise refresh after a Codex task completes
+lodex index --session <thread-id-or-jsonl-path> --json
+```
+
 ## Development
+
+Create or synchronize the project environment, then run Lodex through the
+checkout. Development does not require a user-wide tool installation.
+
+```bash
+uv sync
+uv run lodex status
+uv run lodex index
+```
+
+For local dogfooding, an optional editable tool installation makes `lodex`
+available from other projects while reflecting Python source changes
+immediately:
+
+```bash
+uv tool install --editable .
+```
+
+Re-run that command with `--force` after changing dependencies, entry points,
+or other `pyproject.toml` metadata:
+
+```bash
+uv tool install --force --editable .
+```
+
+Run the local validation suite from the checkout:
 
 ```bash
 uv run pytest

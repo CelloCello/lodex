@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lodex History"
+  short_description: "Search local Codex session history with Lodex"
+  default_prompt: "Use $lodex-history to find prior decisions and implementation context for this project."
