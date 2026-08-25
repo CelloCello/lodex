@@ -24,6 +24,7 @@ from lodex.indexer import Indexer, IndexingError, IndexRuntimeError
 from lodex.projects import project_identity
 from lodex.retrieval import Retrieval, RetrievalError, show_context
 from lodex.skill_install import install_skill, remove_skill
+from lodex.sources import CodexSessionSource
 from lodex.storage import (
     Storage,
     StorageCompatibilityError,
@@ -46,8 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"lodex {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    index_parser = commands.add_parser("index", help="incrementally index Codex sessions")
-    index_parser.add_argument("--session", help="session ID or JSONL path")
+    index_parser = commands.add_parser(
+        "index", help="incrementally index configured coding-agent sessions"
+    )
+    index_parser.add_argument("--session", help="source-native session ID or transcript path")
     index_parser.add_argument("--since", help="include sessions created on/after ISO date")
     index_parser.add_argument("--until", help="include sessions created on/before ISO date")
     index_parser.add_argument("--prune", action="store_true", help="delete missing sources")
@@ -55,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     search_parser = commands.add_parser("search", help="hybrid-search indexed sessions")
     search_parser.add_argument("query")
+    search_parser.add_argument("--source", help="coding-agent source name")
     search_parser.add_argument("--project", help="current or a project path/identity")
     search_parser.add_argument("--since")
     search_parser.add_argument("--until")
@@ -134,6 +138,11 @@ def _print_status(
     print(f"  dimension: {dimension} (expected {ollama.expected_dimension})")
     print(f"  database: {database.path}")
     print(f"  indexed: {database.sessions} sessions, {database.chunks} chunks")
+    source_counts = ", ".join(
+        f"{source}={count}" for source, count in sorted(database.sources.items())
+    )
+    print(f"  agent sources: {source_counts or '-'}")
+    print(f"  content range: {database.content_since or '-'} to {database.content_until or '-'}")
     if ollama.error:
         print(f"  Ollama error: {ollama.error}")
     if database.error:
@@ -189,6 +198,7 @@ def _print_show(result: ShowResult, *, as_json: bool) -> None:
         _print_json(asdict(result))
         return
     print(f"Session: {result.session_id}")
+    print(f"Agent source: {result.source}")
     print(f"Source: {result.source_path}")
     for turn in result.turns:
         marker = "*" if turn.turn_id == result.matched_turn_id else " "
@@ -289,7 +299,7 @@ def _run(args: argparse.Namespace, config: AppConfig) -> int:
             summary = Indexer(
                 storage,
                 _embedder(config),
-                roots=config.session_roots,
+                source=CodexSessionSource(config.codex_home),
                 progress=_index_progress,
             ).index(
                 target=args.session,
@@ -317,6 +327,7 @@ def _run(args: argparse.Namespace, config: AppConfig) -> int:
             retrieval = Retrieval(storage, _embedder(config))
             results = retrieval.search(
                 args.query,
+                source=args.source,
                 project=_resolved_project(args.project),
                 since=args.since,
                 until=args.until,

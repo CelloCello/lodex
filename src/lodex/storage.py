@@ -26,7 +26,7 @@ from lodex.contracts import (
     TurnRecord,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class StorageError(RuntimeError):
@@ -40,6 +40,7 @@ class StorageCompatibilityError(StorageError):
 @dataclass(frozen=True, slots=True)
 class StoredSession:
     session_id: str
+    source: str
     source_path: str
     file_size: int
     file_mtime_ns: int
@@ -52,6 +53,123 @@ def _utc_now() -> str:
 
 def _placeholders(count: int) -> str:
     return ", ".join("?" for _ in range(count))
+
+
+def _status_snapshot(
+    connection: sqlite3.Connection,
+    *,
+    path: Path,
+    expected_dimension: int,
+    provider: str | None,
+    model: str | None,
+    digest: str | None,
+    error: str | None = None,
+) -> DatabaseStatus:
+    """Read status fields from a known Lodex schema without mutating it."""
+
+    schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    metadata = {
+        str(row["key"]): str(row["value"])
+        for row in connection.execute("SELECT key, value FROM metadata")
+    }
+    counts = {
+        table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+        for table in ("sessions", "turns", "chunks")
+    }
+    session_columns = {
+        str(row["name"]) for row in connection.execute("PRAGMA table_info(sessions)")
+    }
+    if "source" in session_columns:
+        source_counts = {
+            str(row["source"]): int(row["session_count"])
+            for row in connection.execute(
+                """
+                SELECT source, COUNT(*) AS session_count
+                FROM sessions
+                GROUP BY source
+                ORDER BY source
+                """
+            )
+        }
+    else:
+        source_counts = {"codex": counts["sessions"]} if counts["sessions"] else {}
+    missing = int(
+        connection.execute("SELECT COUNT(*) FROM sessions WHERE missing = 1").fetchone()[0]
+    )
+    warnings = int(
+        connection.execute("SELECT COALESCE(SUM(warning_count), 0) FROM sessions").fetchone()[0]
+    )
+    content_range = connection.execute(
+        """
+        WITH indexed_sessions AS (
+            SELECT s.created_at, unixepoch(s.created_at) AS created_epoch
+            FROM sessions s
+            WHERE s.missing = 0
+              AND s.created_at IS NOT NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM chunks c
+                  WHERE c.session_id = s.session_id
+              )
+        )
+        SELECT
+            (
+                SELECT created_at
+                FROM indexed_sessions
+                WHERE created_epoch IS NOT NULL
+                ORDER BY created_epoch ASC, created_at ASC
+                LIMIT 1
+            ) AS content_since,
+            (
+                SELECT created_at
+                FROM indexed_sessions
+                WHERE created_epoch IS NOT NULL
+                ORDER BY created_epoch DESC, created_at DESC
+                LIMIT 1
+            ) AS content_until
+        """
+    ).fetchone()
+    stored_dimension_value = metadata.get("embedding_dimension")
+    try:
+        stored_dimension = (
+            int(stored_dimension_value) if stored_dimension_value is not None else None
+        )
+    except ValueError:
+        stored_dimension = None
+    compatible = (
+        error is None
+        and schema_version == SCHEMA_VERSION
+        and stored_dimension == expected_dimension
+    )
+    for key, expected in (
+        ("embedding_provider", provider),
+        ("embedding_model", model),
+        ("embedding_model_digest", digest),
+    ):
+        stored = metadata.get(key)
+        if expected is not None and stored is not None and stored != expected:
+            compatible = False
+    return DatabaseStatus(
+        path=str(path),
+        initialized=True,
+        schema_version=schema_version,
+        sqlite_vec_version=metadata.get("sqlite_vec_version"),
+        provider=metadata.get("embedding_provider"),
+        model=metadata.get("embedding_model"),
+        model_digest=metadata.get("embedding_model_digest"),
+        dimension=stored_dimension,
+        compatible=compatible,
+        sessions=counts["sessions"],
+        turns=counts["turns"],
+        chunks=counts["chunks"],
+        sources=source_counts,
+        missing_sessions=missing,
+        warnings=warnings,
+        content_since=content_range["content_since"],
+        content_until=content_range["content_until"],
+        last_indexed_at=metadata.get("last_indexed_at"),
+        error=error,
+    )
 
 
 class Storage(AbstractContextManager["Storage"]):
@@ -147,6 +265,8 @@ class Storage(AbstractContextManager["Storage"]):
             )
         if version == 0:
             self._create_schema()
+        elif version == 1:
+            self._migrate_v1_to_v2()
         self._ensure_schema_metadata()
         stored_dimension = self.get_metadata("embedding_dimension")
         if stored_dimension is not None and int(stored_dimension) != self.dimension:
@@ -189,6 +309,7 @@ class Storage(AbstractContextManager["Storage"]):
 
             CREATE TABLE sessions (
                 session_id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
                 source_path TEXT NOT NULL,
                 created_at TEXT,
                 cwd TEXT,
@@ -200,6 +321,7 @@ class Storage(AbstractContextManager["Storage"]):
                 file_mtime_ns INTEGER NOT NULL,
                 indexed_at TEXT NOT NULL
             );
+            CREATE INDEX sessions_source_idx ON sessions(source);
             CREATE INDEX sessions_source_path_idx ON sessions(source_path);
             CREATE INDEX sessions_project_idx ON sessions(project);
             CREATE INDEX sessions_created_at_idx ON sessions(created_at);
@@ -252,6 +374,24 @@ class Storage(AbstractContextManager["Storage"]):
             self.connection.rollback()
             raise
 
+    def _migrate_v1_to_v2(self) -> None:
+        """Tag the legacy Codex-only index without rebuilding vectors."""
+
+        try:
+            self.connection.executescript(
+                f"""
+                BEGIN IMMEDIATE;
+                ALTER TABLE sessions ADD COLUMN source TEXT NOT NULL DEFAULT 'codex';
+                CREATE INDEX sessions_source_idx ON sessions(source);
+                UPDATE metadata SET value = '{SCHEMA_VERSION}' WHERE key = 'schema_version';
+                PRAGMA user_version = {SCHEMA_VERSION};
+                COMMIT;
+                """
+            )
+        except Exception:
+            self.connection.rollback()
+            raise
+
     def _ensure_schema_metadata(self) -> None:
         with self.connection:
             for key, value in {
@@ -285,20 +425,20 @@ class Storage(AbstractContextManager["Storage"]):
             (key, value),
         )
 
-    def get_session_by_path(self, source_path: str) -> StoredSession | None:
+    def get_session_by_path(self, source: str, source_path: str) -> StoredSession | None:
         row = self.connection.execute(
             """
-            SELECT session_id, source_path, file_size, file_mtime_ns, missing
-            FROM sessions WHERE source_path = ?
+            SELECT session_id, source, source_path, file_size, file_mtime_ns, missing
+            FROM sessions WHERE source = ? AND source_path = ?
             """,
-            (source_path,),
+            (source, source_path),
         ).fetchone()
         return self._stored_session(row)
 
     def get_session(self, session_id: str) -> StoredSession | None:
         row = self.connection.execute(
             """
-            SELECT session_id, source_path, file_size, file_mtime_ns, missing
+            SELECT session_id, source, source_path, file_size, file_mtime_ns, missing
             FROM sessions WHERE session_id = ?
             """,
             (session_id,),
@@ -311,6 +451,7 @@ class Storage(AbstractContextManager["Storage"]):
             return None
         return StoredSession(
             session_id=str(row["session_id"]),
+            source=str(row["source"]),
             source_path=str(row["source_path"]),
             file_size=int(row["file_size"]),
             file_mtime_ns=int(row["file_mtime_ns"]),
@@ -399,6 +540,13 @@ class Storage(AbstractContextManager["Storage"]):
         elif embedding_result is not None and embedding_result.embeddings:
             raise StorageError("Unexpected embeddings without new chunks")
 
+        stored_session = self.get_session(session.session_id)
+        if stored_session is not None and stored_session.source != session.source:
+            raise StorageError(
+                f"Session ID {session.session_id!r} is already owned by source "
+                f"{stored_session.source!r}; source adapters must namespace IDs"
+            )
+
         current_ids = self.existing_chunk_ids(session.session_id)
         desired_ids = {chunk.chunk_id for chunk in chunks}
         obsolete_ids = current_ids - desired_ids
@@ -418,10 +566,11 @@ class Storage(AbstractContextManager["Storage"]):
             self.connection.execute(
                 """
                 INSERT INTO sessions(
-                    session_id, source_path, created_at, cwd, project, archived, missing,
+                    session_id, source, source_path, created_at, cwd, project, archived, missing,
                     warning_count, file_size, file_mtime_ns, indexed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
+                    source = excluded.source,
                     source_path = excluded.source_path,
                     created_at = excluded.created_at,
                     cwd = excluded.cwd,
@@ -435,6 +584,7 @@ class Storage(AbstractContextManager["Storage"]):
                 """,
                 (
                     session.session_id,
+                    session.source,
                     session.source_path,
                     session.created_at,
                     session.cwd,
@@ -545,13 +695,19 @@ class Storage(AbstractContextManager["Storage"]):
             f"DELETE FROM chunks WHERE chunk_id IN ({_placeholders(len(values))})", values
         )
 
-    def mark_missing(self, seen_paths: set[str]) -> int:
-        rows = self.connection.execute("SELECT session_id, source_path FROM sessions").fetchall()
+    def mark_missing(self, seen_paths: set[str], *, source: str) -> int:
+        rows = self.connection.execute(
+            "SELECT session_id, source_path FROM sessions WHERE source = ?",
+            (source,),
+        ).fetchall()
         missing_ids = [
             str(row["session_id"]) for row in rows if row["source_path"] not in seen_paths
         ]
         with self.connection:
-            self.connection.execute("UPDATE sessions SET missing = 0")
+            self.connection.execute(
+                "UPDATE sessions SET missing = 0 WHERE source = ?",
+                (source,),
+            )
             if missing_ids:
                 self.connection.execute(
                     f"UPDATE sessions SET missing = 1 WHERE session_id IN "
@@ -560,10 +716,13 @@ class Storage(AbstractContextManager["Storage"]):
                 )
         return len(missing_ids)
 
-    def prune_missing(self) -> int:
+    def prune_missing(self, *, source: str) -> int:
         session_ids = [
             str(row[0])
-            for row in self.connection.execute("SELECT session_id FROM sessions WHERE missing = 1")
+            for row in self.connection.execute(
+                "SELECT session_id FROM sessions WHERE source = ? AND missing = 1",
+                (source,),
+            )
         ]
         with self.connection:
             for session_id in session_ids:
@@ -584,6 +743,7 @@ class Storage(AbstractContextManager["Storage"]):
     def _filter_sql(
         self,
         *,
+        source: str | None,
         project: str | None,
         since: str | None,
         until: str | None,
@@ -591,6 +751,9 @@ class Storage(AbstractContextManager["Storage"]):
     ) -> tuple[str, list[object]]:
         clauses: list[str] = []
         values: list[object] = []
+        if source:
+            clauses.append(f"{prefix}.source = ?")
+            values.append(source)
         if project:
             clauses.append(f"{prefix}.project = ?")
             values.append(project)
@@ -607,11 +770,17 @@ class Storage(AbstractContextManager["Storage"]):
         vector: Sequence[float],
         *,
         limit: int,
+        source: str | None = None,
         project: str | None = None,
         since: str | None = None,
         until: str | None = None,
     ) -> list[dict[str, Any]]:
-        filters, values = self._filter_sql(project=project, since=since, until=until)
+        filters, values = self._filter_sql(
+            source=source,
+            project=project,
+            since=since,
+            until=until,
+        )
         serialized_vector = sqlite_vec.serialize_float32(vector)
 
         def query(pool: int) -> list[dict[str, Any]]:
@@ -625,7 +794,7 @@ class Storage(AbstractContextManager["Storage"]):
                         WHERE embedding MATCH ? AND k = ?
                         ORDER BY distance
                     )
-                    SELECT c.*, s.source_path, s.cwd, s.project, s.created_at,
+                    SELECT c.*, s.source, s.source_path, s.cwd, s.project, s.created_at,
                            nearest.distance
                     FROM nearest
                     JOIN chunks c ON c.rowid = nearest.rowid
@@ -672,16 +841,22 @@ class Storage(AbstractContextManager["Storage"]):
         fts_query: str,
         *,
         limit: int,
+        source: str | None = None,
         project: str | None = None,
         since: str | None = None,
         until: str | None = None,
     ) -> list[dict[str, Any]]:
-        filters, values = self._filter_sql(project=project, since=since, until=until)
+        filters, values = self._filter_sql(
+            source=source,
+            project=project,
+            since=since,
+            until=until,
+        )
         return [
             dict(row)
             for row in self.connection.execute(
                 f"""
-                SELECT c.*, s.source_path, s.cwd, s.project, s.created_at,
+                SELECT c.*, s.source, s.source_path, s.cwd, s.project, s.created_at,
                        bm25(chunks_fts) AS lexical_score
                 FROM chunks_fts
                 JOIN chunks c ON c.rowid = chunks_fts.rowid
@@ -697,7 +872,7 @@ class Storage(AbstractContextManager["Storage"]):
     def show_context(self, chunk_id: str, *, context: int) -> tuple[sqlite3.Row, list[TurnRecord]]:
         row = self.connection.execute(
             """
-            SELECT c.*, t.ordinal, s.source_path, s.cwd, s.project
+            SELECT c.*, t.ordinal, s.source, s.source_path, s.cwd, s.project
             FROM chunks c
             JOIN turns t ON t.session_id = c.session_id AND t.turn_id = c.turn_id
             JOIN sessions s ON s.session_id = c.session_id
@@ -743,47 +918,13 @@ class Storage(AbstractContextManager["Storage"]):
         model: str | None = None,
         digest: str | None = None,
     ) -> DatabaseStatus:
-        metadata = {
-            str(row["key"]): str(row["value"])
-            for row in self.connection.execute("SELECT key, value FROM metadata")
-        }
-        counts = {
-            table: int(self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-            for table in ("sessions", "turns", "chunks")
-        }
-        missing = int(
-            self.connection.execute("SELECT COUNT(*) FROM sessions WHERE missing = 1").fetchone()[0]
-        )
-        warnings = int(
-            self.connection.execute(
-                "SELECT COALESCE(SUM(warning_count), 0) FROM sessions"
-            ).fetchone()[0]
-        )
-        compatible = int(metadata.get("embedding_dimension", "0")) == self.dimension
-        for key, expected in (
-            ("embedding_provider", provider),
-            ("embedding_model", model),
-            ("embedding_model_digest", digest),
-        ):
-            stored = metadata.get(key)
-            if expected is not None and stored is not None and stored != expected:
-                compatible = False
-        return DatabaseStatus(
-            path=str(self.path),
-            initialized=True,
-            schema_version=int(metadata.get("schema_version", SCHEMA_VERSION)),
-            sqlite_vec_version=metadata.get("sqlite_vec_version"),
-            provider=metadata.get("embedding_provider"),
-            model=metadata.get("embedding_model"),
-            model_digest=metadata.get("embedding_model_digest"),
-            dimension=int(metadata["embedding_dimension"]),
-            compatible=compatible,
-            sessions=counts["sessions"],
-            turns=counts["turns"],
-            chunks=counts["chunks"],
-            missing_sessions=missing,
-            warnings=warnings,
-            last_indexed_at=metadata.get("last_indexed_at"),
+        return _status_snapshot(
+            self.connection,
+            path=self.path,
+            expected_dimension=self.dimension,
+            provider=provider,
+            model=model,
+            digest=digest,
         )
 
     def reset(self) -> None:
@@ -830,6 +971,41 @@ def database_status(
     try:
         with Storage(resolved, dimension=dimension, read_only=True) as storage:
             return storage.status(provider=provider, model=model, digest=digest)
+    except StorageCompatibilityError as exc:
+        message = str(exc) or exc.__class__.__name__
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(f"{resolved.as_uri()}?mode=ro", uri=True)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only = ON")
+            schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if 0 < schema_version <= SCHEMA_VERSION:
+                return _status_snapshot(
+                    connection,
+                    path=resolved,
+                    expected_dimension=dimension,
+                    provider=provider,
+                    model=model,
+                    digest=digest,
+                    error=message,
+                )
+        except Exception:
+            pass
+        finally:
+            if connection is not None:
+                connection.close()
+        return DatabaseStatus(
+            path=str(resolved),
+            initialized=True,
+            schema_version=None,
+            sqlite_vec_version=None,
+            provider=None,
+            model=None,
+            model_digest=None,
+            dimension=None,
+            compatible=False,
+            error=message,
+        )
     except Exception as exc:
         return DatabaseStatus(
             path=str(resolved),

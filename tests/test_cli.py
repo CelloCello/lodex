@@ -76,6 +76,7 @@ def test_json_commands_are_parseable_and_incremental(
     assert cli.main(["index", "--since", "2026-08-20", "--until", "2026-08-20", "--json"]) == 0
     first = json.loads(capsys.readouterr().out)
     assert first["embedded_chunks"] == 1
+    assert first["source"] == "codex"
 
     assert cli.main(["index", "--json"]) == 0
     second = json.loads(capsys.readouterr().out)
@@ -85,17 +86,57 @@ def test_json_commands_are_parseable_and_incremental(
     assert cli.main(["search", "parser", "--json"]) == 0
     search = json.loads(capsys.readouterr().out)
     assert search["count"] == 1
+    assert search["results"][0]["source"] == "codex"
     chunk_id = search["results"][0]["chunk_id"]
 
     assert cli.main(["show", chunk_id, "--json"]) == 0
     shown = json.loads(capsys.readouterr().out)
     assert shown["chunk_id"] == chunk_id
+    assert shown["source"] == "codex"
     assert len(shown["turns"]) == 1
 
     assert cli.main(["status", "--json"]) == 0
     status = json.loads(capsys.readouterr().out)
     assert status["compatible"] is True
     assert status["database"]["chunks"] == 1
+    assert status["database"]["sources"] == {"codex": 1}
+    assert status["database"]["content_since"] == "2026-08-20T01:00:00Z"
+    assert status["database"]["content_until"] == "2026-08-20T01:00:00Z"
+
+    assert cli.main(["status"]) == 0
+    human_status = capsys.readouterr().out
+    assert "agent sources: codex=1" in human_status
+    assert "content range: 2026-08-20T01:00:00Z to 2026-08-20T01:00:00Z" in human_status
+
+
+def test_status_json_reports_real_counts_for_legacy_schema(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_cli(monkeypatch, tmp_path)
+    database = tmp_path / "data" / "lodex.db"
+    assert cli.main(["index", "--json"]) == 0
+    capsys.readouterr()
+    with Storage(database, dimension=3) as storage:
+        storage.connection.execute("DROP INDEX sessions_source_idx")
+        storage.connection.execute("ALTER TABLE sessions DROP COLUMN source")
+        storage.connection.execute("PRAGMA user_version = 1")
+        storage.set_metadata("schema_version", "1")
+        storage.connection.commit()
+
+    assert cli.main(["status", "--json"]) == 1
+    status = json.loads(capsys.readouterr().out)
+    assert status["compatible"] is False
+    assert status["database"]["schema_version"] == 1
+    assert status["database"]["sessions"] == 1
+    assert status["database"]["turns"] == 1
+    assert status["database"]["chunks"] == 1
+    assert status["database"]["sources"] == {"codex": 1}
+    assert status["database"]["content_since"] == "2026-08-20T01:00:00Z"
+    assert "requires migration" in status["database"]["error"]
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
 
 
 def test_json_usage_error_and_rebuild_confirmation(

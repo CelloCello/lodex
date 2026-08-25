@@ -35,9 +35,10 @@ class TurnRecord:
 
 @dataclass(frozen=True, slots=True)
 class SessionRecord:
-    """Normalized metadata and turns from one read-only Codex JSONL file."""
+    """Normalized metadata and turns from one read-only agent session."""
 
     session_id: str
+    source: str
     source_path: str
     created_at: str | None
     cwd: str | None
@@ -85,6 +86,7 @@ class IndexSummary:
     missing_sessions: int = 0
     pruned_sessions: int = 0
     warnings: tuple[str, ...] = ()
+    source: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +102,7 @@ class SearchResult:
     vector_rank: int | None
     lexical_rank: int | None
     source_path: str
+    source: str
     cwd: str | None
     project: str
     created_at: str | None
@@ -112,6 +115,7 @@ class ShowResult:
     chunk_id: str
     session_id: str
     source_path: str
+    source: str
     cwd: str | None
     project: str
     matched_turn_id: str
@@ -134,8 +138,11 @@ class DatabaseStatus:
     sessions: int = 0
     turns: int = 0
     chunks: int = 0
+    sources: Mapping[str, int] = field(default_factory=dict)
     missing_sessions: int = 0
     warnings: int = 0
+    content_since: str | None = None
+    content_until: str | None = None
     last_indexed_at: str | None = None
     error: str | None = None
 

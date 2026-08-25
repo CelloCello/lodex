@@ -67,6 +67,7 @@ def session(
     )
     record = SessionRecord(
         session_id=session_id,
+        source="codex",
         source_path=str(source),
         created_at=created_at,
         cwd=str(source.parent),
@@ -140,6 +141,7 @@ def test_hybrid_search_ranks_identifier_and_semantic_query(tmp_path: Path) -> No
         semantic = retrieval.search("避免索引寫到一半", limit=3)
 
         assert lexical[0].chunk_id == chunk_ids["a"][0]
+        assert lexical[0].source == "codex"
         assert lexical[0].lexical_rank == 1
         assert chunk_ids["a"][1] in {hit.chunk_id for hit in semantic[:3]}
 
@@ -156,10 +158,12 @@ def test_project_date_filters_and_empty_results(tmp_path: Path) -> None:
             until="2026-08-31",
         )
         empty = retrieval.search("transaction", project="path:/missing")
+        wrong_source = retrieval.search("transaction", source="other-agent")
 
         assert filtered
         assert all(hit.project == "path:/project-a" for hit in filtered)
         assert empty == ()
+        assert wrong_source == ()
 
 
 def test_explicit_lexical_search_does_not_call_embedder(tmp_path: Path) -> None:

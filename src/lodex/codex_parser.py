@@ -313,6 +313,7 @@ class CodexSessionParser:
         flush_implicit_or_active()
         return SessionRecord(
             session_id=session_id,
+            source="codex",
             source_path=str(path.resolve()),
             created_at=created_at,
             cwd=cwd,

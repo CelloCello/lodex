@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "lodex"
 version = "0.1.0"
-description = "Local-first retrieval for Codex session history"
+description = "Local-first retrieval for coding-agent session history"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

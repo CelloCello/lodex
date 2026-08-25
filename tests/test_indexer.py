@@ -6,11 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from lodex import indexer as indexer_module
-from lodex.codex_parser import parse_codex_session
 from lodex.contracts import EmbeddingResult, SessionRecord
 from lodex.dates import DateRangeError
 from lodex.indexer import Indexer, IndexingError
+from lodex.sources import CodexSessionSource, SessionCandidate
 from lodex.storage import Storage, StorageCompatibilityError
 from tests.fakes import FakeEmbedder
 
@@ -23,7 +22,7 @@ def make_indexer(tmp_path: Path, fake: FakeEmbedder) -> tuple[Storage, Indexer, 
     active.mkdir()
     archived.mkdir()
     storage = Storage(tmp_path / "lodex.db", dimension=fake.dimension)
-    return storage, Indexer(storage, fake, roots=(active, archived)), active, archived
+    return storage, Indexer(storage, fake, source=CodexSessionSource(tmp_path)), active, archived
 
 
 def test_incremental_rerun_and_changed_turn_embed_only_delta(tmp_path: Path) -> None:
@@ -83,18 +82,18 @@ def test_move_after_discovery_is_followed_without_failure(
     source = active / "completed.jsonl"
     archived_source = archived / source.name
     shutil.copy2(FIXTURES / "completed.jsonl", source)
-    original_select = indexer_module.select_canonical_session_files
+    original_discover = indexer.source.discover
     moved = False
 
-    def select_then_move(paths: Sequence[Path]) -> tuple[Path, ...]:
+    def discover_then_move() -> tuple[SessionCandidate, ...]:
         nonlocal moved
-        selected = original_select(paths)
+        selected = original_discover()
         if not moved:
             source.replace(archived_source)
             moved = True
         return selected
 
-    monkeypatch.setattr(indexer_module, "select_canonical_session_files", select_then_move)
+    monkeypatch.setattr(indexer.source, "discover", discover_then_move)
     try:
         summary = indexer.index()
         row = storage.connection.execute(
@@ -118,7 +117,7 @@ def test_move_during_parse_is_followed_without_duplicate_embedding(
     source = active / "completed.jsonl"
     archived_source = archived / source.name
     shutil.copy2(FIXTURES / "completed.jsonl", source)
-    original_parse = parse_codex_session
+    original_parse = indexer.source.parse
 
     def parse_then_move(path: Path) -> SessionRecord:
         session = original_parse(path)
@@ -126,7 +125,7 @@ def test_move_during_parse_is_followed_without_duplicate_embedding(
             source.replace(archived_source)
         return session
 
-    monkeypatch.setattr(indexer_module, "parse_codex_session", parse_then_move)
+    monkeypatch.setattr(indexer.source, "parse", parse_then_move)
     try:
         summary = indexer.index()
         row = storage.connection.execute(
@@ -216,7 +215,7 @@ def test_partial_embedding_failure_preserves_previous_session(tmp_path: Path) ->
             def embed_documents(self, texts: Sequence[str]) -> EmbeddingResult:
                 raise RuntimeError("embedding unavailable")
 
-        failed = Indexer(storage, FailingFake(3), roots=indexer.roots).index()
+        failed = Indexer(storage, FailingFake(3), source=indexer.source).index()
 
         assert failed.failed_sessions == 1
         assert "embedding unavailable" in failed.warnings[0]
@@ -247,7 +246,7 @@ def test_failed_archived_move_does_not_mark_or_prune_previous_session(tmp_path: 
             def embed_documents(self, texts: Sequence[str]) -> EmbeddingResult:
                 raise RuntimeError("embedding unavailable")
 
-        failed = Indexer(storage, FailingFake(3), roots=indexer.roots).index(prune=True)
+        failed = Indexer(storage, FailingFake(3), source=indexer.source).index(prune=True)
 
         assert failed.failed_sessions == 1
         assert failed.missing_sessions == 0
@@ -260,7 +259,7 @@ def test_failed_archived_move_does_not_mark_or_prune_previous_session(tmp_path: 
         assert storage.status().missing_sessions == 0
         assert storage.chunk_count == 1
 
-        recovered = Indexer(storage, FakeEmbedder(3), roots=indexer.roots).index(prune=True)
+        recovered = Indexer(storage, FakeEmbedder(3), source=indexer.source).index(prune=True)
         row = storage.connection.execute(
             "SELECT source_path, archived, missing FROM sessions"
         ).fetchone()
@@ -294,7 +293,7 @@ def test_unchanged_index_still_rejects_model_digest_change(tmp_path: Path) -> No
         changed_model = FakeEmbedder(dimension=3, digest="changed-digest")
 
         with pytest.raises(StorageCompatibilityError, match="rebuild"):
-            Indexer(storage, changed_model, roots=indexer.roots).index()
+            Indexer(storage, changed_model, source=indexer.source).index()
     finally:
         storage.close()
 

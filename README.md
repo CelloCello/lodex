@@ -1,9 +1,10 @@
 # Lodex
 
-Lodex is a local-first retrieval tool for Codex session history. It reads Codex
-JSONL transcripts without modifying them, generates embeddings through a
-loopback-only Ollama connection, and stores a hybrid FTS5/`sqlite-vec` index in
-SQLite.
+Lodex is a local-first retrieval tool for coding-agent session history. Its
+indexing core consumes normalized session source adapters; the currently bundled
+adapter reads Codex JSONL transcripts without modifying them. Lodex generates
+embeddings through a loopback-only Ollama connection and stores a hybrid
+FTS5/`sqlite-vec` index in SQLite.
 
 ## Installation and usage
 
@@ -57,6 +58,12 @@ Re-run the tool installation to update the installed CLI from the checkout:
 uv tool install --force /absolute/path/to/lodex
 ```
 
+When updating a schema-v1 Codex-only database, run `lodex index` once before
+read-only commands. The migration tags existing sessions as `codex` and preserves
+all chunks and embeddings. Before migration, `lodex status` remains read-only and
+reports the legacy database's real counters and content range alongside the
+compatibility error.
+
 The CLI installation and Codex skill are updated separately. `skill install`
 adds a missing skill, leaves an identical copy unchanged, and updates an older
 or modified copy. Preview the operation before replacing the installed copy:
@@ -98,6 +105,7 @@ lodex index --prune
 lodex search "why was the parser changed?"
 lodex search "StorageCompatibilityError" --project current --limit 5 --json
 lodex search "index transaction" --since 2026-08-01 --until 2026-08-31
+lodex search "index transaction" --source codex
 
 # Explicit FTS-only retrieval when loopback Ollama cannot be reached
 lodex search "StorageCompatibilityError" --project current --lexical --json
@@ -105,7 +113,7 @@ lodex search "StorageCompatibilityError" --project current --lexical --json
 # Expand only the matched turn and a bounded number of neighbors
 lodex show <chunk-id> --context 1 --json
 
-# Check Ollama, model identity, schema, and index counters
+# Check Ollama, model identity, schema, counters, and indexed content range
 lodex status --json
 
 # Required after an incompatible model digest/dimension or chunking contract change
@@ -127,6 +135,14 @@ runtime/index failures, and `2` for usage or configuration errors. Search never
 silently falls back when Ollama is unavailable; lexical-only retrieval requires
 the explicit `--lexical` option.
 
+Status reports `content_since` and `content_until` from the creation timestamps
+of non-missing sessions that contain indexed chunks. These bounds describe the
+stored searchable content, not when its embeddings were generated, and do not
+guarantee that every session between the bounds is present.
+
+Search and show results include the agent `source`. Status includes session
+counts grouped by source.
+
 ## Configuration
 
 Lodex optionally reads `~/.config/lodex/config.toml`:
@@ -147,6 +163,21 @@ dimension = 1024
 `LODEX_OLLAMA_MODEL`, and `LODEX_EMBEDDING_DIMENSION` override TOML values.
 Lodex rejects every non-loopback `OLLAMA_HOST`, so transcript text cannot be
 sent to a remote embedding endpoint by mistake.
+
+## Session source adapters
+
+Agent-specific discovery and transcript parsing live under `lodex.sources`.
+The generic indexer depends only on the `SessionSource` contract: an adapter
+reports availability, discovers cheap session candidates, resolves an explicit
+target, parses one transcript into `SessionRecord`, and handles source-specific
+file relocation.
+
+Only the `codex` adapter is bundled today. The database stores a source name on
+every session, missing-source reconciliation and pruning are scoped to that
+source, and retrieval results expose it. Future adapters must emit globally
+unique internal session IDs; namespacing them as `<source>:<native-id>` is the
+recommended convention. The Codex adapter retains its legacy IDs so existing
+indexes do not need to regenerate chunk embeddings.
 
 ## Privacy and automation
 
