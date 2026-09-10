@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 TurnStatus = Literal["completed", "aborted", "active"]
+SessionKind = Literal["direct", "audit", "automation", "subagent", "unknown"]
+SESSION_KINDS: tuple[SessionKind, ...] = ("direct", "audit", "automation", "subagent", "unknown")
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +48,8 @@ class SessionRecord:
     turns: tuple[TurnRecord, ...]
     warnings: tuple[ParseWarning, ...] = ()
     metadata: Mapping[str, str] = field(default_factory=dict)
+    kind: SessionKind = "unknown"
+    provenance: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +110,8 @@ class SearchResult:
     cwd: str | None
     project: str
     created_at: str | None
+    kind: SessionKind = "unknown"
+    provenance: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +126,8 @@ class ShowResult:
     project: str
     matched_turn_id: str
     turns: tuple[TurnRecord, ...]
+    kind: SessionKind = "unknown"
+    provenance: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +138,14 @@ class UserTextStats:
     nonempty_turns: int
     empty_turns: int
     nonempty_ratio: float | None
+    scope: Literal["non_missing_sessions"] = "non_missing_sessions"
+
+
+@dataclass(frozen=True, slots=True)
+class SessionKindStats:
+    total_sessions: int
+    counts: Mapping[str, int]
+    pending_sessions: int
     scope: Literal["non_missing_sessions"] = "non_missing_sessions"
 
 
@@ -156,6 +172,7 @@ class DatabaseStatus:
     content_until: str | None = None
     last_indexed_at: str | None = None
     user_text_stats: UserTextStats | None = None
+    session_kind_stats: SessionKindStats | None = None
     error: str | None = None
 
 

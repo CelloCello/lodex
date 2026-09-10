@@ -12,9 +12,53 @@ from lodex.dates import DateRangeError
 from lodex.indexer import Indexer, IndexingError
 from lodex.sources import CodexSessionSource, SessionCandidate
 from lodex.storage import Storage, StorageCompatibilityError
-from tests.fakes import FakeEmbedder
+from tests.fakes import FakeEmbedder, downgrade_schema
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_origin_migration_backfills_unchanged_files_without_reembedding(
+    tmp_path: Path, version: int
+) -> None:
+    fake = FakeEmbedder(dimension=3)
+    storage, indexer, active, _ = make_indexer(tmp_path, fake)
+    shutil.copy2(FIXTURES / "approval-audit.jsonl", active / "audit.jsonl")
+    try:
+        indexer.index()
+        original_ids = storage.existing_chunk_ids("session-approval")
+        original_vectors = [
+            tuple(row)
+            for row in storage.connection.execute(
+                "SELECT rowid, embedding FROM chunk_embeddings ORDER BY rowid"
+            )
+        ]
+        downgrade_schema(storage.connection, version)
+    finally:
+        storage.close()
+    with Storage(tmp_path / "lodex.db", dimension=3) as migrated:
+        stats = migrated.status().session_kind_stats
+        assert stats is not None
+        assert stats.counts["unknown"] == stats.pending_sessions == 1
+        indexer = Indexer(migrated, fake, source=CodexSessionSource(tmp_path))
+        result = indexer.index()
+        assert (result.parsed_sessions, result.embedded_chunks) == (1, 0)
+        assert len(fake.document_calls) == 1
+        assert migrated.existing_chunk_ids("session-approval") == original_ids
+        assert [
+            tuple(row)
+            for row in migrated.connection.execute(
+                "SELECT rowid, embedding FROM chunk_embeddings ORDER BY rowid"
+            )
+        ] == original_vectors
+        stats = migrated.status().session_kind_stats
+        assert stats is not None
+        assert stats.counts["audit"] == 1
+        assert stats.pending_sessions == 0
+        assert indexer.index().unchanged_sessions == 1
+        row, _ = migrated.show_context(next(iter(original_ids)), context=0)
+        assert row["kind"] == "audit"
+        assert '"guardian"' in row["provenance_json"]
 
 
 def make_indexer(tmp_path: Path, fake: FakeEmbedder) -> tuple[Storage, Indexer, Path, Path]:

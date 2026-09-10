@@ -216,6 +216,7 @@ class Indexer:
                     not force
                     and stored is not None
                     and not stored.missing
+                    and stored.provenance_indexed
                     and stored.file_size == initial_stat.st_size
                     and stored.file_mtime_ns == initial_stat.st_mtime_ns
                 ):

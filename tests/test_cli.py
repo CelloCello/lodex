@@ -14,7 +14,7 @@ import pytest
 from lodex import cli
 from lodex.embedding import OllamaUnavailableError
 from lodex.storage import Storage, StorageCompatibilityError
-from tests.fakes import FakeEmbedder
+from tests.fakes import FakeEmbedder, downgrade_schema
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -124,11 +124,7 @@ def test_status_json_reports_real_counts_for_legacy_schema(
     assert cli.main(["index", "--json"]) == 0
     capsys.readouterr()
     with Storage(database, dimension=3) as storage:
-        storage.connection.execute("DROP INDEX sessions_source_idx")
-        storage.connection.execute("ALTER TABLE sessions DROP COLUMN source")
-        storage.connection.execute("PRAGMA user_version = 1")
-        storage.set_metadata("schema_version", "1")
-        storage.connection.commit()
+        downgrade_schema(storage.connection, 1)
 
     assert cli.main(["status", "--json"]) == 1
     status = json.loads(capsys.readouterr().out)
@@ -165,6 +161,12 @@ def test_origin_fixtures_scoped_index_status_and_search(
         "empty_turns": 1,
         "nonempty_ratio": 0.8,
     }
+    assert status["database"]["session_kind_stats"] == {
+        "scope": "non_missing_sessions",
+        "total_sessions": 3,
+        "pending_sessions": 0,
+        "counts": {"direct": 0, "audit": 1, "automation": 1, "subagent": 0, "unknown": 1},
+    }
     assert cli.main(["status"]) == 0
     output = capsys.readouterr().out
     assert "4/5 turns non-empty (80.00%), 1 empty" in output
@@ -189,6 +191,21 @@ def test_origin_fixtures_scoped_index_status_and_search(
     assert refresh["parsed_sessions"] == 1
     assert refresh["embedded_chunks"] == 0
     assert len(fake.document_calls) == calls
+    assert cli.main(["search", "ApprovalAuditFixture", "--kind", "audit", "--json"]) == 0
+    hits = json.loads(capsys.readouterr().out)["results"]
+    assert len(hits) == 1
+    assert hits[0]["kind"] == "audit"
+    assert hits[0]["provenance"]["source"] == {"subagent": {"other": "guardian"}}
+    assert cli.main(["show", hits[0]["chunk_id"], "--json"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["kind"] == "audit"
+    assert shown["provenance"] == hits[0]["provenance"]
+    assert (
+        cli.main(["search", "ApprovalAuditFixture", "--kind", "direct", "--lexical", "--json"]) == 0
+    )
+    assert json.loads(capsys.readouterr().out)["count"] == 0
+    assert cli.main(["search", "anything", "--kind", "invalid", "--json"]) == 2
+    capsys.readouterr()
 
 
 def test_status_user_text_unavailable_and_empty_output(

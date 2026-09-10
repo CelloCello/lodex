@@ -9,6 +9,7 @@ import pytest
 from lodex.chunking import chunk_turn
 from lodex.contracts import EmbeddingResult, SessionRecord, TurnRecord, UserTextStats
 from lodex.storage import Storage, StorageCompatibilityError, StorageError, database_status
+from tests.fakes import downgrade_schema
 
 
 def make_session(
@@ -77,10 +78,7 @@ def test_status_user_text_counts_exclude_missing_and_include_all_turn_statuses(
             )
         storage.mark_missing({str(tmp_path / f"{i}.jsonl") for i in range(3)}, source="codex")
         if legacy:
-            storage.connection.execute("DROP INDEX sessions_source_idx")
-            storage.connection.execute("ALTER TABLE sessions DROP COLUMN source")
-            storage.connection.execute("PRAGMA user_version = 1")
-            storage.connection.commit()
+            downgrade_schema(storage.connection, 1)
     before = database.read_bytes()
     status = database_status(database, dimension=3)
     assert status.turns == 4
@@ -313,11 +311,7 @@ def test_v1_database_migrates_existing_sessions_to_codex_source(tmp_path: Path) 
             file_mtime_ns=1,
             project="path:/project",
         )
-        storage.connection.execute("DROP INDEX sessions_source_idx")
-        storage.connection.execute("ALTER TABLE sessions DROP COLUMN source")
-        storage.connection.execute("PRAGMA user_version = 1")
-        storage.set_metadata("schema_version", "1")
-        storage.connection.commit()
+        downgrade_schema(storage.connection, 1)
 
     modified_at = database.stat().st_mtime_ns
     legacy_status = database_status(
@@ -332,6 +326,9 @@ def test_v1_database_migrates_existing_sessions_to_codex_source(tmp_path: Path) 
     assert legacy_status.error == "Database schema 1 requires migration; run lodex index first"
     assert (legacy_status.sessions, legacy_status.turns, legacy_status.chunks) == (1, 1, 1)
     assert legacy_status.sources == {"codex": 1}
+    assert legacy_status.session_kind_stats is not None
+    assert legacy_status.session_kind_stats.counts["unknown"] == 1
+    assert legacy_status.session_kind_stats.pending_sessions == 1
     assert legacy_status.content_since == session.created_at
     assert legacy_status.content_until == session.created_at
     assert legacy_status.dimension == 3
@@ -344,7 +341,7 @@ def test_v1_database_migrates_existing_sessions_to_codex_source(tmp_path: Path) 
         stored = migrated.get_session(session.session_id)
         assert stored is not None
         assert stored.source == "codex"
-        assert migrated.status().schema_version == 2
+        assert migrated.status().schema_version == 3
         assert migrated.chunk_count == 1
 
 
