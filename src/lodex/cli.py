@@ -54,6 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
     index_parser.add_argument("--since", help="include sessions created on/after ISO date")
     index_parser.add_argument("--until", help="include sessions created on/before ISO date")
     index_parser.add_argument("--prune", action="store_true", help="delete missing sources")
+    index_parser.add_argument(
+        "--force", action="store_true", help="reparse unchanged files after parser updates"
+    )
     index_parser.add_argument("--json", action="store_true", dest="as_json")
 
     search_parser = commands.add_parser("search", help="hybrid-search indexed sessions")
@@ -306,6 +309,7 @@ def _run(args: argparse.Namespace, config: AppConfig) -> int:
                 prune=args.prune,
                 since=args.since,
                 until=args.until,
+                force=args.force,
             )
         if as_json:
             _print_json(asdict(summary))

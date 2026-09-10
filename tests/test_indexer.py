@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,43 @@ def test_active_to_archived_move_does_not_reembed(tmp_path: Path) -> None:
         ).fetchone()
         assert row["source_path"] == str(archived_source.resolve())
         assert (row["archived"], row["missing"]) == (1, 0)
+    finally:
+        storage.close()
+
+
+def test_force_refresh_repairs_old_parse_and_reuses_unchanged_embeddings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeEmbedder(dimension=3)
+    storage, indexer, active, _ = make_indexer(tmp_path, fake)
+    source = active / "legacy.jsonl"
+    shutil.copy2(FIXTURES / "legacy-multi-turn.jsonl", source)
+    parse = indexer.source.parse
+
+    def old_parse(path: Path) -> SessionRecord:
+        session = parse(path)
+        return replace(session, turns=tuple(replace(t, user_text="") for t in session.turns))
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(indexer.source, "parse", old_parse)
+            indexer.index()
+        assert indexer.index().unchanged_sessions == 1
+        refreshed = indexer.index(force=True)
+        assert refreshed.parsed_sessions == 1
+        assert refreshed.embedded_chunks == 2
+        assert len(fake.document_calls) == 2
+        assert all("User:" in text for text in fake.document_calls[-1])
+        assert storage.chunk_count == 2
+        assert indexer.index(force=True).embedded_chunks == 0
+        assert len(fake.document_calls) == 2
+        users = storage.connection.execute(
+            "SELECT user_text FROM turns ORDER BY ordinal"
+        ).fetchall()
+        assert [row[0] for row in users] == [
+            "Explain the first implementation",
+            "What changed later?",
+        ]
     finally:
         storage.close()
 

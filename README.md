@@ -96,6 +96,7 @@ uv tool uninstall lodex
 # Initial backfill or incremental refresh
 lodex index
 lodex index --session <thread-id-or-jsonl-path>
+lodex index --force
 lodex index --since 2026-08-01 --until 2026-08-07
 
 # Sources that disappeared are marked missing; deletion is always explicit
@@ -124,6 +125,16 @@ Run the initial `index` until it completes. Re-running the same command is safe:
 unchanged sessions and chunks do not call Ollama again, so it is also the normal
 day-to-day incremental refresh command. If a run is interrupted, start it again;
 successfully committed sessions are retained.
+
+After a parser update, run `lodex index --force` to reparse unchanged transcripts
+and replace their indexed turns. Unchanged chunks reuse their existing embeddings;
+only new or changed chunks are embedded. This can also be scoped with `--session`
+or date filters. A normal incremental run skips unchanged source files.
+
+The Codex parser reads user text from both `event_msg.user_message` and
+`response_item.message` input text, pairing duplicate representations within each
+turn while retaining repeated requests and steering messages. Standalone injected
+AGENTS.md instructions and environment context blocks are excluded.
 
 Index date filters use the timestamp in `session_meta`; date-only bounds are
 inclusive and interpreted as UTC. Range indexing never marks out-of-range

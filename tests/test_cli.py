@@ -83,6 +83,11 @@ def test_json_commands_are_parseable_and_incremental(
     assert second["embedded_chunks"] == 0
     assert len(fake.document_calls) == 1
 
+    assert cli.main(["index", "--force", "--json"]) == 0
+    forced = json.loads(capsys.readouterr().out)
+    assert forced["parsed_sessions"] == 1
+    assert forced["embedded_chunks"] == 0
+
     assert cli.main(["search", "parser", "--json"]) == 0
     search = json.loads(capsys.readouterr().out)
     assert search["count"] == 1

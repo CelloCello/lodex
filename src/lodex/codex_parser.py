@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -72,10 +72,12 @@ def _append_text(existing: str, message: str) -> str:
 
 
 def _is_internal_user_message(message: str) -> bool:
-    return bool(_INTERNAL_ENVIRONMENT_CONTEXT.fullmatch(message))
+    return bool(_INTERNAL_ENVIRONMENT_CONTEXT.fullmatch(message)) or (
+        message.startswith("# AGENTS.md instructions") and message.endswith("</INSTRUCTIONS>")
+    )
 
 
-def _message_text(payload: Mapping[str, Any]) -> str:
+def _message_text(payload: Mapping[str, Any], *, user: bool = False) -> str:
     blocks = payload.get("content")
     if not isinstance(blocks, list):
         return ""
@@ -83,10 +85,10 @@ def _message_text(payload: Mapping[str, Any]) -> str:
     for block in blocks:
         if not isinstance(block, Mapping):
             continue
-        if block.get("type") not in {"output_text", "text"}:
+        if block.get("type") not in ({"input_text", "text"} if user else {"output_text", "text"}):
             continue
         value = _text(block.get("text"))
-        if value:
+        if value and not (user and _is_internal_user_message(value)):
             texts.append(value)
     return "\n".join(texts)
 
@@ -101,6 +103,16 @@ class _TurnBuilder:
     user_text: str = ""
     assistant_text: str = ""
     assistant_fallback: str = ""
+    user_occurrences: dict[tuple[str, str], int] = field(default_factory=dict)
+
+    def append_user(self, message: str, source: str) -> None:
+        # Pair duplicate representations, without dropping repeated user requests.
+        key = (source, message)
+        count = self.user_occurrences.get(key, 0) + 1
+        self.user_occurrences[key] = count
+        other = "response" if source == "event" else "event"
+        if count > self.user_occurrences.get((other, message), 0):
+            self.user_text = _append_text(self.user_text, message)
 
     @property
     def has_content(self) -> bool:
@@ -242,7 +254,7 @@ class CodexSessionParser:
                         ):
                             flush("completed", current.last_activity_at)
                         builder = ensure_turn(line_number, timestamp, _text(payload.get("turn_id")))
-                        builder.user_text = _append_text(builder.user_text, message)
+                        builder.append_user(message, "event")
                         builder.last_activity_at = timestamp or builder.last_activity_at
                     elif event_type == "agent_message":
                         phase = _text(payload.get("phase"))
@@ -279,6 +291,20 @@ class CodexSessionParser:
                     item_type = _text(payload.get("type"))
                     if item_type == "message":
                         role = _text(payload.get("role"))
+                        if role == "user":
+                            message = _message_text(payload, user=True)
+                            if not message:
+                                continue
+                            if (
+                                current is not None
+                                and not current.explicit_lifecycle
+                                and current.has_assistant
+                            ):
+                                flush("completed", current.last_activity_at)
+                            builder = ensure_turn(line_number, timestamp)
+                            builder.append_user(message, "response")
+                            builder.last_activity_at = timestamp or builder.last_activity_at
+                            continue
                         phase = _text(payload.get("phase"))
                         is_legacy_assistant = phase == "" and (
                             current is None or not current.explicit_lifecycle
