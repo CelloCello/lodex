@@ -14,7 +14,7 @@ import pytest
 from lodex import cli
 from lodex.embedding import OllamaUnavailableError
 from lodex.storage import Storage, StorageCompatibilityError
-from tests.fakes import FakeEmbedder
+from tests.fakes import FakeEmbedder, downgrade_schema
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -83,6 +83,11 @@ def test_json_commands_are_parseable_and_incremental(
     assert second["embedded_chunks"] == 0
     assert len(fake.document_calls) == 1
 
+    assert cli.main(["index", "--force", "--json"]) == 0
+    forced = json.loads(capsys.readouterr().out)
+    assert forced["parsed_sessions"] == 1
+    assert forced["embedded_chunks"] == 0
+
     assert cli.main(["search", "parser", "--json"]) == 0
     search = json.loads(capsys.readouterr().out)
     assert search["count"] == 1
@@ -119,11 +124,7 @@ def test_status_json_reports_real_counts_for_legacy_schema(
     assert cli.main(["index", "--json"]) == 0
     capsys.readouterr()
     with Storage(database, dimension=3) as storage:
-        storage.connection.execute("DROP INDEX sessions_source_idx")
-        storage.connection.execute("ALTER TABLE sessions DROP COLUMN source")
-        storage.connection.execute("PRAGMA user_version = 1")
-        storage.set_metadata("schema_version", "1")
-        storage.connection.commit()
+        downgrade_schema(storage.connection, 1)
 
     assert cli.main(["status", "--json"]) == 1
     status = json.loads(capsys.readouterr().out)
@@ -133,10 +134,90 @@ def test_status_json_reports_real_counts_for_legacy_schema(
     assert status["database"]["turns"] == 1
     assert status["database"]["chunks"] == 1
     assert status["database"]["sources"] == {"codex": 1}
+    assert status["database"]["user_text_stats"]["nonempty_ratio"] == 1.0
     assert status["database"]["content_since"] == "2026-08-20T01:00:00Z"
     assert "requires migration" in status["database"]["error"]
     with sqlite3.connect(database) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_origin_fixtures_scoped_index_status_and_search(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake, sessions = configure_cli(monkeypatch, tmp_path)
+    (sessions / "completed.jsonl").unlink()
+    for name in ("approval-audit.jsonl", "automation.jsonl", "unknown-origin.jsonl"):
+        shutil.copy2(FIXTURES / name, sessions / name)
+    assert cli.main(["index", "--since", "2026-09-01", "--until", "2026-09-03", "--json"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert (summary["parsed_sessions"], summary["indexed_turns"]) == (3, 5)
+    assert cli.main(["status", "--json"]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["compatible"] is True
+    assert status["database"]["user_text_stats"] == {
+        "scope": "non_missing_sessions",
+        "total_turns": 5,
+        "nonempty_turns": 4,
+        "empty_turns": 1,
+        "nonempty_ratio": 0.8,
+    }
+    assert status["database"]["session_kind_stats"] == {
+        "scope": "non_missing_sessions",
+        "total_sessions": 3,
+        "pending_sessions": 0,
+        "counts": {"direct": 0, "audit": 1, "automation": 1, "subagent": 0, "unknown": 1},
+    }
+    assert cli.main(["status"]) == 0
+    output = capsys.readouterr().out
+    assert "4/5 turns non-empty (80.00%), 1 empty" in output
+    assert "text presence does not prove completeness" in output
+    for query, session_id in (
+        ("ApprovalAuditFixture", "session-approval"),
+        ("AutomationFixture", "session-automation"),
+        ("UnknownOriginFixture", "session-unknown-origin"),
+    ):
+        assert cli.main(["search", query, "--lexical", "--json"]) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result["count"] > 0
+        assert {hit["session_id"] for hit in result["results"]} == {session_id}
+    calls = len(fake.document_calls)
+    assert (
+        cli.main(
+            ["index", "--force", "--session", str(sessions / "approval-audit.jsonl"), "--json"]
+        )
+        == 0
+    )
+    refresh = json.loads(capsys.readouterr().out)
+    assert refresh["parsed_sessions"] == 1
+    assert refresh["embedded_chunks"] == 0
+    assert len(fake.document_calls) == calls
+    assert cli.main(["search", "ApprovalAuditFixture", "--kind", "audit", "--json"]) == 0
+    hits = json.loads(capsys.readouterr().out)["results"]
+    assert len(hits) == 1
+    assert hits[0]["kind"] == "audit"
+    assert hits[0]["provenance"]["source"] == {"subagent": {"other": "guardian"}}
+    assert cli.main(["show", hits[0]["chunk_id"], "--json"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["kind"] == "audit"
+    assert shown["provenance"] == hits[0]["provenance"]
+    assert (
+        cli.main(["search", "ApprovalAuditFixture", "--kind", "direct", "--lexical", "--json"]) == 0
+    )
+    assert json.loads(capsys.readouterr().out)["count"] == 0
+    assert cli.main(["search", "anything", "--kind", "invalid", "--json"]) == 2
+    capsys.readouterr()
+
+
+def test_status_user_text_unavailable_and_empty_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    configure_cli(monkeypatch, tmp_path)
+    assert cli.main(["status"]) == 0
+    assert "user text (non-missing sessions): unavailable" in capsys.readouterr().out
+    with Storage(tmp_path / "data" / "lodex.db", dimension=3):
+        pass
+    assert cli.main(["status"]) == 0
+    assert "0/0 turns non-empty (N/A), 0 empty" in capsys.readouterr().out
 
 
 def test_json_usage_error_and_rebuild_confirmation(

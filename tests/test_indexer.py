@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,53 @@ from lodex.dates import DateRangeError
 from lodex.indexer import Indexer, IndexingError
 from lodex.sources import CodexSessionSource, SessionCandidate
 from lodex.storage import Storage, StorageCompatibilityError
-from tests.fakes import FakeEmbedder
+from tests.fakes import FakeEmbedder, downgrade_schema
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_origin_migration_backfills_unchanged_files_without_reembedding(
+    tmp_path: Path, version: int
+) -> None:
+    fake = FakeEmbedder(dimension=3)
+    storage, indexer, active, _ = make_indexer(tmp_path, fake)
+    shutil.copy2(FIXTURES / "approval-audit.jsonl", active / "audit.jsonl")
+    try:
+        indexer.index()
+        original_ids = storage.existing_chunk_ids("session-approval")
+        original_vectors = [
+            tuple(row)
+            for row in storage.connection.execute(
+                "SELECT rowid, embedding FROM chunk_embeddings ORDER BY rowid"
+            )
+        ]
+        downgrade_schema(storage.connection, version)
+    finally:
+        storage.close()
+    with Storage(tmp_path / "lodex.db", dimension=3) as migrated:
+        stats = migrated.status().session_kind_stats
+        assert stats is not None
+        assert stats.counts["unknown"] == stats.pending_sessions == 1
+        indexer = Indexer(migrated, fake, source=CodexSessionSource(tmp_path))
+        result = indexer.index()
+        assert (result.parsed_sessions, result.embedded_chunks) == (1, 0)
+        assert len(fake.document_calls) == 1
+        assert migrated.existing_chunk_ids("session-approval") == original_ids
+        assert [
+            tuple(row)
+            for row in migrated.connection.execute(
+                "SELECT rowid, embedding FROM chunk_embeddings ORDER BY rowid"
+            )
+        ] == original_vectors
+        stats = migrated.status().session_kind_stats
+        assert stats is not None
+        assert stats.counts["audit"] == 1
+        assert stats.pending_sessions == 0
+        assert indexer.index().unchanged_sessions == 1
+        row, _ = migrated.show_context(next(iter(original_ids)), context=0)
+        assert row["kind"] == "audit"
+        assert '"guardian"' in row["provenance_json"]
 
 
 def make_indexer(tmp_path: Path, fake: FakeEmbedder) -> tuple[Storage, Indexer, Path, Path]:
@@ -69,6 +114,43 @@ def test_active_to_archived_move_does_not_reembed(tmp_path: Path) -> None:
         ).fetchone()
         assert row["source_path"] == str(archived_source.resolve())
         assert (row["archived"], row["missing"]) == (1, 0)
+    finally:
+        storage.close()
+
+
+def test_force_refresh_repairs_old_parse_and_reuses_unchanged_embeddings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeEmbedder(dimension=3)
+    storage, indexer, active, _ = make_indexer(tmp_path, fake)
+    source = active / "legacy.jsonl"
+    shutil.copy2(FIXTURES / "legacy-multi-turn.jsonl", source)
+    parse = indexer.source.parse
+
+    def old_parse(path: Path) -> SessionRecord:
+        session = parse(path)
+        return replace(session, turns=tuple(replace(t, user_text="") for t in session.turns))
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(indexer.source, "parse", old_parse)
+            indexer.index()
+        assert indexer.index().unchanged_sessions == 1
+        refreshed = indexer.index(force=True)
+        assert refreshed.parsed_sessions == 1
+        assert refreshed.embedded_chunks == 2
+        assert len(fake.document_calls) == 2
+        assert all("User:" in text for text in fake.document_calls[-1])
+        assert storage.chunk_count == 2
+        assert indexer.index(force=True).embedded_chunks == 0
+        assert len(fake.document_calls) == 2
+        users = storage.connection.execute(
+            "SELECT user_text FROM turns ORDER BY ordinal"
+        ).fetchall()
+        assert [row[0] for row in users] == [
+            "Explain the first implementation",
+            "What changed later?",
+        ]
     finally:
         storage.close()
 

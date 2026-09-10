@@ -6,11 +6,11 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from lodex.contracts import ParseWarning, SessionRecord, TurnRecord, TurnStatus
+from lodex.contracts import ParseWarning, SessionKind, SessionRecord, TurnRecord, TurnStatus
 
 _KNOWN_TOP_LEVEL = {
     "inter_agent_communication_metadata",
@@ -62,6 +62,25 @@ def _text(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _session_kind(provenance: Mapping[str, Any]) -> SessionKind:
+    """Classify structural origin signals, never prompt text or client names."""
+    thread_source = provenance.get("thread_source")
+    source = provenance.get("source")
+    subagent = source.get("subagent") if isinstance(source, Mapping) else None
+    guardian = isinstance(subagent, Mapping) and subagent.get("other") == "guardian"
+    if thread_source == "guardian_review":
+        return "audit"
+    if guardian:
+        return "audit" if thread_source in (None, "subagent") else "unknown"
+    if thread_source == "user":
+        return "direct" if subagent is None else "unknown"
+    if thread_source == "automation":
+        return "automation"
+    if thread_source == "subagent" or (thread_source is None and subagent is not None):
+        return "subagent"
+    return "unknown"
+
+
 def _content_hash(user_text: str, assistant_text: str) -> str:
     canonical = f"user\0{user_text}\0assistant\0{assistant_text}"
     return hashlib.sha256(canonical.encode()).hexdigest()
@@ -72,10 +91,12 @@ def _append_text(existing: str, message: str) -> str:
 
 
 def _is_internal_user_message(message: str) -> bool:
-    return bool(_INTERNAL_ENVIRONMENT_CONTEXT.fullmatch(message))
+    return bool(_INTERNAL_ENVIRONMENT_CONTEXT.fullmatch(message)) or (
+        message.startswith("# AGENTS.md instructions") and message.endswith("</INSTRUCTIONS>")
+    )
 
 
-def _message_text(payload: Mapping[str, Any]) -> str:
+def _message_text(payload: Mapping[str, Any], *, user: bool = False) -> str:
     blocks = payload.get("content")
     if not isinstance(blocks, list):
         return ""
@@ -83,10 +104,10 @@ def _message_text(payload: Mapping[str, Any]) -> str:
     for block in blocks:
         if not isinstance(block, Mapping):
             continue
-        if block.get("type") not in {"output_text", "text"}:
+        if block.get("type") not in ({"input_text", "text"} if user else {"output_text", "text"}):
             continue
         value = _text(block.get("text"))
-        if value:
+        if value and not (user and _is_internal_user_message(value)):
             texts.append(value)
     return "\n".join(texts)
 
@@ -101,6 +122,16 @@ class _TurnBuilder:
     user_text: str = ""
     assistant_text: str = ""
     assistant_fallback: str = ""
+    user_occurrences: dict[tuple[str, str], int] = field(default_factory=dict)
+
+    def append_user(self, message: str, source: str) -> None:
+        # Pair duplicate representations, without dropping repeated user requests.
+        key = (source, message)
+        count = self.user_occurrences.get(key, 0) + 1
+        self.user_occurrences[key] = count
+        other = "response" if source == "event" else "event"
+        if count > self.user_occurrences.get((other, message), 0):
+            self.user_text = _append_text(self.user_text, message)
 
     @property
     def has_content(self) -> bool:
@@ -118,6 +149,7 @@ class CodexSessionParser:
         path = Path(source)
         warnings: list[ParseWarning] = []
         metadata: dict[str, str] = {}
+        provenance: dict[str, Any] = {}
         session_id = self._session_id_from_path(path)
         created_at: str | None = None
         cwd: str | None = None
@@ -205,6 +237,15 @@ class CodexSessionParser:
                         session_id = candidate_id
                     created_at = _text(payload.get("timestamp")) or timestamp or created_at
                     cwd = _text(payload.get("cwd")) or cwd
+                    for key in (
+                        "thread_source",
+                        "source",
+                        "originator",
+                        "parent_thread_id",
+                        "forked_from_id",
+                    ):
+                        if key in payload:
+                            provenance[key] = payload[key]
                     for key in ("cli_version", "model_provider", "originator", "source"):
                         value = _text(payload.get(key))
                         if value:
@@ -242,7 +283,7 @@ class CodexSessionParser:
                         ):
                             flush("completed", current.last_activity_at)
                         builder = ensure_turn(line_number, timestamp, _text(payload.get("turn_id")))
-                        builder.user_text = _append_text(builder.user_text, message)
+                        builder.append_user(message, "event")
                         builder.last_activity_at = timestamp or builder.last_activity_at
                     elif event_type == "agent_message":
                         phase = _text(payload.get("phase"))
@@ -279,6 +320,20 @@ class CodexSessionParser:
                     item_type = _text(payload.get("type"))
                     if item_type == "message":
                         role = _text(payload.get("role"))
+                        if role == "user":
+                            message = _message_text(payload, user=True)
+                            if not message:
+                                continue
+                            if (
+                                current is not None
+                                and not current.explicit_lifecycle
+                                and current.has_assistant
+                            ):
+                                flush("completed", current.last_activity_at)
+                            builder = ensure_turn(line_number, timestamp)
+                            builder.append_user(message, "response")
+                            builder.last_activity_at = timestamp or builder.last_activity_at
+                            continue
                         phase = _text(payload.get("phase"))
                         is_legacy_assistant = phase == "" and (
                             current is None or not current.explicit_lifecycle
@@ -321,6 +376,8 @@ class CodexSessionParser:
             turns=tuple(replace(turn, session_id=session_id) for turn in turns),
             warnings=tuple(warnings),
             metadata=metadata,
+            kind=_session_kind(provenance),
+            provenance=provenance,
         )
 
     @staticmethod

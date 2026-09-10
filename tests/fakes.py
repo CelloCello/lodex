@@ -1,8 +1,25 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Sequence
 
 from lodex.contracts import EmbeddingResult, OllamaStatus
+
+
+def downgrade_schema(connection: sqlite3.Connection, version: int) -> None:
+    """Recreate the pre-origin schema for migration tests without changing vectors."""
+    assert version in (1, 2)
+    connection.execute("DROP INDEX sessions_kind_idx")
+    for column in ("kind", "provenance_json", "provenance_indexed"):
+        connection.execute(f"ALTER TABLE sessions DROP COLUMN {column}")
+    if version == 1:
+        connection.execute("DROP INDEX sessions_source_idx")
+        connection.execute("ALTER TABLE sessions DROP COLUMN source")
+    connection.execute(f"PRAGMA user_version = {version}")
+    connection.execute(
+        "UPDATE metadata SET value = ? WHERE key = 'schema_version'", (str(version),)
+    )
+    connection.commit()
 
 
 class FakeEmbedder:

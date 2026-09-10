@@ -1,10 +1,164 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from lodex.codex_parser import parse_codex_session
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.mark.parametrize(
+    ("fixture", "users", "answers"),
+    [
+        (
+            "approval-audit.jsonl",
+            ["ApprovalAuditFixture: assess the proposed read of README.md."],
+            ["The proposed action only reads a project file."],
+        ),
+        (
+            "automation.jsonl",
+            ["AutomationFixture: summarize changes since the last check.", ""],
+            ["The parser now preserves requests.", "No additional changes."],
+        ),
+        (
+            "unknown-origin.jsonl",
+            ["UnknownOriginFixture: explain the decision."] * 2,
+            ["Keep retrieval local.", "Local storage supports offline retrieval."],
+        ),
+    ],
+)
+def test_transcript_origin_fixtures_preserve_content(
+    fixture: str, users: list[str], answers: list[str]
+) -> None:
+    session = parse_codex_session(FIXTURES / fixture)
+    assert [turn.user_text for turn in session.turns] == users
+    assert [turn.assistant_text for turn in session.turns] == answers
+    assert [turn.ordinal for turn in session.turns] == list(range(len(users)))
+    assert len({turn.turn_id for turn in session.turns}) == len(users)
+    assert all(turn.status == "completed" for turn in session.turns)
+    assert not session.warnings
+
+
+@pytest.mark.parametrize(
+    ("origin", "kind"),
+    [
+        ({"thread_source": "user", "source": "vscode"}, "direct"),
+        ({"thread_source": "automation", "source": "vscode"}, "automation"),
+        ({"thread_source": "guardian_review"}, "audit"),
+        ({"thread_source": "subagent", "source": {"subagent": {"other": "guardian"}}}, "audit"),
+        ({"source": {"subagent": {"other": "guardian"}}}, "audit"),
+        (
+            {
+                "thread_source": "subagent",
+                "source": {"subagent": {"thread_spawn": {"parent_thread_id": "p"}}},
+            },
+            "subagent",
+        ),
+        ({"thread_source": "subagent"}, "subagent"),
+        ({"source": "exec", "originator": "codex_exec"}, "unknown"),
+        ({"source": "cli"}, "unknown"),
+        ({"thread_source": "future-kind"}, "unknown"),
+        ({"thread_source": "user", "source": {"subagent": {"other": "guardian"}}}, "unknown"),
+        ({}, "unknown"),
+    ],
+)
+def test_session_origin_is_structural_and_preserved(
+    tmp_path: Path, origin: dict[str, object], kind: str
+) -> None:
+    records = [
+        json.loads(line) for line in (FIXTURES / "approval-audit.jsonl").read_text().splitlines()
+    ]
+    records[0]["payload"] = {"id": "origin-test", **origin}
+    path = tmp_path / "origin.jsonl"
+    path.write_text("\n".join(json.dumps(record) for record in records))
+    session = parse_codex_session(path)
+    assert session.kind == kind
+    assert session.provenance == origin
+    # Identical audit-sounding user text must not drive the origin classifier.
+    assert session.turns[0].user_text.startswith("ApprovalAuditFixture")
+
+
+def test_response_only_users_preserve_legacy_boundaries_and_filter_blocks(tmp_path: Path) -> None:
+    path = tmp_path / "response-only.jsonl"
+    records = [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "# AGENTS.md instructions\n<INSTRUCTIONS>\ninternal\n</INSTRUCTIONS>",
+                },
+                {
+                    "type": "input_text",
+                    "text": "<environment_context>internal</environment_context>",
+                },
+                {"type": "input_image", "image_url": "ignored"},
+                {"type": "input_text", "text": "Find the requirement"},
+                {"type": "input_text", "text": "and its decision"},
+            ],
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "output_text", "text": "Found it"},
+            ],
+        },
+        {
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Follow up"},
+            ],
+        },
+    ]
+    path.write_text("\n".join(json.dumps({"type": "response_item", "payload": p}) for p in records))
+    session = parse_codex_session(path)
+    assert [t.user_text for t in session.turns] == [
+        "Find the requirement\nand its decision",
+        "Follow up",
+    ]
+    assert [t.status for t in session.turns] == ["completed", "active"]
+
+
+@pytest.mark.parametrize("sources", [("event", "response"), ("response", "event")])
+def test_user_dedup_preserves_repetition_and_mixed_steering(
+    tmp_path: Path, sources: tuple[str, str]
+) -> None:
+    path = tmp_path / "mixed.jsonl"
+    records: list[dict[str, object]] = [
+        {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "one"}},
+    ]
+    for message, representations in [
+        ("Do it", sources),
+        ("Do it", sources),
+        ("Response-only steering", ("response",)),
+        ("Event-only steering", ("event",)),
+    ]:
+        for source in representations:
+            records.append(
+                {"type": "event_msg", "payload": {"type": "user_message", "message": message}}
+                if source == "event"
+                else {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": message}],
+                    },
+                }
+            )
+    records.append({"type": "event_msg", "payload": {"type": "task_complete"}})
+    path.write_text("\n".join(json.dumps(r) for r in records))
+    session = parse_codex_session(path)
+    assert len(session.turns) == 1
+    assert session.turns[0].user_text == (
+        "Do it\n\nDo it\n\nResponse-only steering\n\nEvent-only steering"
+    )
 
 
 def test_completed_turn_metadata_and_stable_order() -> None:

@@ -58,11 +58,14 @@ Re-run the tool installation to update the installed CLI from the checkout:
 uv tool install --force /absolute/path/to/lodex
 ```
 
-When updating a schema-v1 Codex-only database, run `lodex index` once before
-read-only commands. The migration tags existing sessions as `codex` and preserves
-all chunks and embeddings. Before migration, `lodex status` remains read-only and
-reports the legacy database's real counters and content range alongside the
-compatibility error.
+When updating a schema-v1 or schema-v2 database, run `lodex index` once before
+search or show. Schema v3 preserves all chunks and embeddings and adds session
+origin fields. Existing sessions start as `unknown` with provenance pending;
+incremental indexing reparses pending sessions even when their files are unchanged.
+Unchanged chunks reuse their embeddings. A scoped index only backfills that scope;
+`status` reports how many non-missing sessions remain pending. Before migration,
+`status` stays read-only and reports the old counters alongside the compatibility
+error. Missing source files remain unknown until they can be read again.
 
 The CLI installation and Codex skill are updated separately. `skill install`
 adds a missing skill, leaves an identical copy unchanged, and updates an older
@@ -96,6 +99,7 @@ uv tool uninstall lodex
 # Initial backfill or incremental refresh
 lodex index
 lodex index --session <thread-id-or-jsonl-path>
+lodex index --force
 lodex index --since 2026-08-01 --until 2026-08-07
 
 # Sources that disappeared are marked missing; deletion is always explicit
@@ -106,6 +110,9 @@ lodex search "why was the parser changed?"
 lodex search "StorageCompatibilityError" --project current --limit 5 --json
 lodex search "index transaction" --since 2026-08-01 --until 2026-08-31
 lodex search "index transaction" --source codex
+lodex search "permission to read project files" --kind audit
+lodex search "requirements" --kind direct --project current
+lodex search "scheduled summary" --kind automation
 
 # Explicit FTS-only retrieval when loopback Ollama cannot be reached
 lodex search "StorageCompatibilityError" --project current --lexical --json
@@ -125,6 +132,16 @@ unchanged sessions and chunks do not call Ollama again, so it is also the normal
 day-to-day incremental refresh command. If a run is interrupted, start it again;
 successfully committed sessions are retained.
 
+After a parser update, run `lodex index --force` to reparse unchanged transcripts
+and replace their indexed turns. Unchanged chunks reuse their existing embeddings;
+only new or changed chunks are embedded. This can also be scoped with `--session`
+or date filters. A normal incremental run skips unchanged source files.
+
+The Codex parser reads user text from both `event_msg.user_message` and
+`response_item.message` input text, pairing duplicate representations within each
+turn while retaining repeated requests and steering messages. Standalone injected
+AGENTS.md instructions and environment context blocks are excluded.
+
 Index date filters use the timestamp in `session_meta`; date-only bounds are
 inclusive and interpreted as UTC. Range indexing never marks out-of-range
 sessions missing and cannot be combined with `--session` or `--prune`.
@@ -142,6 +159,59 @@ guarantee that every session between the bounds is present.
 
 Search and show results include the agent `source`. Status includes session
 counts grouped by source.
+
+Search supports `--kind direct|audit|automation|subagent|unknown`, independently of
+`--source codex`, project, and date filters. Omitting `--kind` searches all kinds.
+Both lexical and hybrid retrieval apply the kind filter before selecting the final
+results. Search and show expose `kind` and `provenance` in JSON; text output labels
+the kind, and show also prints the original provenance fields.
+
+Kinds describe the indexed **session's origin**, not the author of every message
+or the origin of inherited fork context. The Codex adapter preserves the original
+`thread_source`, structured or string `source`, `originator`, `parent_thread_id`,
+and `forked_from_id` when present. It classifies structural signals as follows:
+
+| Signal | Kind |
+| --- | --- |
+| `thread_source=guardian_review` | `audit` |
+| `source.subagent.other=guardian`, with absent or `subagent` thread source | `audit` |
+| `thread_source=user`, without a subagent source | `direct` |
+| `thread_source=automation` | `automation` |
+| `thread_source=subagent`, or an explicit subagent source without thread source | `subagent` |
+| Missing/unrecognized signals or a conflicting guardian source | `unknown` |
+
+Client names such as `vscode`, `cli`, and `exec`, and words in the prompt, do not
+establish a kind. Original fields are retained even when classification is unknown.
+Origin metadata is not added to chunk text or embeddings.
+
+Default ranking remains relevance-based reciprocal rank fusion (RRF), with no
+origin boost or penalty. Direct tasks are not always the relevant evidence:
+approval decisions and scheduled-run results may answer the query, and older
+human conversations can have unknown origins. Use `--kind` when the desired
+origin is known. Origin filters do not remove injected or quoted content inside
+a transcript; a direct session label is not a guarantee that every chunk contains
+a direct user request.
+
+`database.session_kind_stats` reports `total_sessions`, `counts` for all five
+kinds, and `pending_sessions`, scoped to `non_missing_sessions`. Archived sessions
+are included. A zero pending count means origins were processed, not that every
+session could be classified; old transcripts can legitimately remain unknown.
+An unavailable database returns `null` for these statistics.
+
+Status also reports `database.user_text_stats` in JSON: `total_turns`,
+`nonempty_turns`, `empty_turns`, and `nonempty_ratio` (0–1), with scope
+`non_missing_sessions`. These counts cover stored turns in non-missing sessions,
+including archived sessions and all turn statuses. Empty and ASCII-whitespace-only
+text counts as empty; the parser strips surrounding whitespace before storage.
+The denominator differs from the existing `turns` counter, which includes missing
+sessions. With no eligible turns, counts are zero and the ratio is `null` (N/A in
+text output). If the database is absent or cannot be inspected, the whole stats
+object is `null` (unavailable).
+
+`compatible` describes runtime/index compatibility, not content completeness.
+Text presence does not establish human authorship or correct turn alignment;
+assistant-only turns can legitimately have empty user text. Reading these
+statistics requires no reindexing or schema migration.
 
 ## Configuration
 

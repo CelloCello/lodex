@@ -13,7 +13,7 @@ from typing import Never
 
 from lodex import __version__
 from lodex.config import AppConfig, ConfigurationError, load_config
-from lodex.contracts import DatabaseStatus, OllamaStatus, SearchResult, ShowResult
+from lodex.contracts import SESSION_KINDS, DatabaseStatus, OllamaStatus, SearchResult, ShowResult
 from lodex.dates import DateRangeError
 from lodex.embedding import (
     EmbeddingConfigurationError,
@@ -54,11 +54,15 @@ def build_parser() -> argparse.ArgumentParser:
     index_parser.add_argument("--since", help="include sessions created on/after ISO date")
     index_parser.add_argument("--until", help="include sessions created on/before ISO date")
     index_parser.add_argument("--prune", action="store_true", help="delete missing sources")
+    index_parser.add_argument(
+        "--force", action="store_true", help="reparse unchanged files after parser updates"
+    )
     index_parser.add_argument("--json", action="store_true", dest="as_json")
 
     search_parser = commands.add_parser("search", help="hybrid-search indexed sessions")
     search_parser.add_argument("query")
     search_parser.add_argument("--source", help="coding-agent source name")
+    search_parser.add_argument("--kind", choices=SESSION_KINDS, help="session origin kind")
     search_parser.add_argument("--project", help="current or a project path/identity")
     search_parser.add_argument("--since")
     search_parser.add_argument("--until")
@@ -142,7 +146,24 @@ def _print_status(
         f"{source}={count}" for source, count in sorted(database.sources.items())
     )
     print(f"  agent sources: {source_counts or '-'}")
+    kinds = database.session_kind_stats
+    if kinds is None:
+        print("  session kinds (non-missing sessions): unavailable")
+    else:
+        counts = ", ".join(f"{kind}={count}" for kind, count in kinds.counts.items())
+        print(f"  session kinds (non-missing sessions, {kinds.total_sessions} total): {counts}")
+        print(f"  origins pending backfill: {kinds.pending_sessions}")
     print(f"  content range: {database.content_since or '-'} to {database.content_until or '-'}")
+    stats = database.user_text_stats
+    if stats is None:
+        print("  user text (non-missing sessions): unavailable")
+    else:
+        ratio = f"{stats.nonempty_ratio:.2%}" if stats.nonempty_ratio is not None else "N/A"
+        print(
+            f"  user text (non-missing sessions): {stats.nonempty_turns}/{stats.total_turns} "
+            f"turns non-empty ({ratio}), {stats.empty_turns} empty"
+        )
+    print("  Compatibility checks runtime/index format; text presence does not prove completeness.")
     if ollama.error:
         print(f"  Ollama error: {ollama.error}")
     if database.error:
@@ -189,6 +210,7 @@ def _print_search(
     for index, result in enumerate(results, start=1):
         preview = result.text.replace("\n", " ")[:240]
         print(f"{index}. {result.chunk_id}  score={result.score:.6f}")
+        print(f"   agent={result.source} kind={result.kind}")
         print(f"   {preview}")
         print(f"   {result.source_path}")
 
@@ -199,6 +221,8 @@ def _print_show(result: ShowResult, *, as_json: bool) -> None:
         return
     print(f"Session: {result.session_id}")
     print(f"Agent source: {result.source}")
+    print(f"Session kind: {result.kind}")
+    print(f"Provenance: {json.dumps(dict(result.provenance), ensure_ascii=False, sort_keys=True)}")
     print(f"Source: {result.source_path}")
     for turn in result.turns:
         marker = "*" if turn.turn_id == result.matched_turn_id else " "
@@ -306,6 +330,7 @@ def _run(args: argparse.Namespace, config: AppConfig) -> int:
                 prune=args.prune,
                 since=args.since,
                 until=args.until,
+                force=args.force,
             )
         if as_json:
             _print_json(asdict(summary))
@@ -328,6 +353,7 @@ def _run(args: argparse.Namespace, config: AppConfig) -> int:
             results = retrieval.search(
                 args.query,
                 source=args.source,
+                kind=args.kind,
                 project=_resolved_project(args.project),
                 since=args.since,
                 until=args.until,

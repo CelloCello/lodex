@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
-from lodex.contracts import Embedder, SearchResult, ShowResult
+from lodex.contracts import SESSION_KINDS, Embedder, SearchResult, SessionKind, ShowResult
 from lodex.dates import DateRangeError, normalize_date_range
 from lodex.storage import Storage
 
@@ -40,6 +41,7 @@ class Retrieval:
         query: str,
         *,
         source: str | None = None,
+        kind: str | None = None,
         project: str | None = None,
         since: str | None = None,
         until: str | None = None,
@@ -48,6 +50,8 @@ class Retrieval:
     ) -> tuple[SearchResult, ...]:
         if not query.strip():
             raise RetrievalError("Search query must not be empty")
+        if kind is not None and kind not in SESSION_KINDS:
+            raise RetrievalError(f"Unknown session kind: {kind}")
         if limit <= 0:
             raise RetrievalError("Search limit must be positive")
         if self.storage.chunk_count == 0:
@@ -69,6 +73,7 @@ class Retrieval:
                 embedding.embeddings[0],
                 limit=DEFAULT_CANDIDATES,
                 source=source,
+                kind=kind,
                 project=project,
                 since=normalized_since,
                 until=normalized_until,
@@ -79,6 +84,7 @@ class Retrieval:
                 lexical,
                 limit=DEFAULT_CANDIDATES,
                 source=source,
+                kind=kind,
                 project=project,
                 since=normalized_since,
                 until=normalized_until,
@@ -133,6 +139,8 @@ class Retrieval:
                 cwd=rows[chunk_id]["cwd"],
                 project=str(rows[chunk_id]["project"]),
                 created_at=rows[chunk_id]["created_at"],
+                kind=cast(SessionKind, rows[chunk_id].get("kind", "unknown")),
+                provenance=json.loads(rows[chunk_id].get("provenance_json", "{}")),
             )
             for chunk_id in ordered
         )
@@ -156,4 +164,6 @@ def show_context(storage: Storage, chunk_id: str, *, context: int = 1) -> ShowRe
         project=str(row["project"]),
         matched_turn_id=str(row["turn_id"]),
         turns=tuple(turns),
+        kind=cast(SessionKind, row["kind"]),
+        provenance=json.loads(row["provenance_json"]),
     )

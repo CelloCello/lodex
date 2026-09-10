@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from collections.abc import Iterable, Sequence
@@ -19,14 +20,18 @@ from lodex.chunking import (
     DEFAULT_OVERLAP_CHARS,
 )
 from lodex.contracts import (
+    SESSION_KINDS,
     ChunkRecord,
     DatabaseStatus,
     EmbeddingResult,
+    SessionKindStats,
     SessionRecord,
     TurnRecord,
+    UserTextStats,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+MAX_VECTOR_K = 4096
 
 
 class StorageError(RuntimeError):
@@ -45,6 +50,7 @@ class StoredSession:
     file_size: int
     file_mtime_ns: int
     missing: bool
+    provenance_indexed: bool
 
 
 def _utc_now() -> str:
@@ -76,6 +82,23 @@ def _status_snapshot(
         table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
         for table in ("sessions", "turns", "chunks")
     }
+    user_text_counts = connection.execute(
+        """
+        SELECT COUNT(*) AS total_turns,
+               COALESCE(SUM(length(trim(t.user_text, char(9, 10, 11, 12, 13, 32))) > 0), 0)
+                   AS nonempty_turns
+        FROM turns t JOIN sessions s USING (session_id)
+        WHERE s.missing = 0
+        """
+    ).fetchone()
+    total_turns = int(user_text_counts["total_turns"])
+    nonempty_turns = int(user_text_counts["nonempty_turns"])
+    user_text_stats = UserTextStats(
+        total_turns=total_turns,
+        nonempty_turns=nonempty_turns,
+        empty_turns=total_turns - nonempty_turns,
+        nonempty_ratio=nonempty_turns / total_turns if total_turns else None,
+    )
     session_columns = {
         str(row["name"]) for row in connection.execute("PRAGMA table_info(sessions)")
     }
@@ -96,6 +119,21 @@ def _status_snapshot(
     missing = int(
         connection.execute("SELECT COUNT(*) FROM sessions WHERE missing = 1").fetchone()[0]
     )
+    kind_counts: dict[str, int] = dict.fromkeys(SESSION_KINDS, 0)
+    if "kind" in session_columns:
+        for row in connection.execute(
+            "SELECT kind, COUNT(*) AS n FROM sessions WHERE missing = 0 GROUP BY kind"
+        ):
+            kind_counts[row["kind"]] = int(row["n"])
+        pending = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM sessions WHERE missing = 0 AND provenance_indexed = 0"
+            ).fetchone()[0]
+        )
+    else:
+        kind_counts["unknown"] = counts["sessions"] - missing
+        pending = counts["sessions"] - missing
+    kind_stats = SessionKindStats(counts["sessions"] - missing, kind_counts, pending)
     warnings = int(
         connection.execute("SELECT COALESCE(SUM(warning_count), 0) FROM sessions").fetchone()[0]
     )
@@ -163,6 +201,8 @@ def _status_snapshot(
         turns=counts["turns"],
         chunks=counts["chunks"],
         sources=source_counts,
+        user_text_stats=user_text_stats,
+        session_kind_stats=kind_stats,
         missing_sessions=missing,
         warnings=warnings,
         content_since=content_range["content_since"],
@@ -267,6 +307,8 @@ class Storage(AbstractContextManager["Storage"]):
             self._create_schema()
         elif version == 1:
             self._migrate_v1_to_v2()
+        if version in (1, 2):
+            self._migrate_v2_to_v3()
         self._ensure_schema_metadata()
         stored_dimension = self.get_metadata("embedding_dimension")
         if stored_dimension is not None and int(stored_dimension) != self.dimension:
@@ -310,6 +352,9 @@ class Storage(AbstractContextManager["Storage"]):
             CREATE TABLE sessions (
                 session_id TEXT PRIMARY KEY,
                 source TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'unknown',
+                provenance_json TEXT NOT NULL DEFAULT '{{}}',
+                provenance_indexed INTEGER NOT NULL DEFAULT 0,
                 source_path TEXT NOT NULL,
                 created_at TEXT,
                 cwd TEXT,
@@ -322,6 +367,7 @@ class Storage(AbstractContextManager["Storage"]):
                 indexed_at TEXT NOT NULL
             );
             CREATE INDEX sessions_source_idx ON sessions(source);
+            CREATE INDEX sessions_kind_idx ON sessions(kind);
             CREATE INDEX sessions_source_path_idx ON sessions(source_path);
             CREATE INDEX sessions_project_idx ON sessions(project);
             CREATE INDEX sessions_created_at_idx ON sessions(created_at);
@@ -379,12 +425,31 @@ class Storage(AbstractContextManager["Storage"]):
 
         try:
             self.connection.executescript(
-                f"""
+                """
                 BEGIN IMMEDIATE;
                 ALTER TABLE sessions ADD COLUMN source TEXT NOT NULL DEFAULT 'codex';
                 CREATE INDEX sessions_source_idx ON sessions(source);
-                UPDATE metadata SET value = '{SCHEMA_VERSION}' WHERE key = 'schema_version';
-                PRAGMA user_version = {SCHEMA_VERSION};
+                UPDATE metadata SET value = '2' WHERE key = 'schema_version';
+                PRAGMA user_version = 2;
+                COMMIT;
+                """
+            )
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    def _migrate_v2_to_v3(self) -> None:
+        """Preserve content/vectors and mark session origins for incremental backfill."""
+        try:
+            self.connection.executescript(
+                """
+                BEGIN IMMEDIATE;
+                ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'unknown';
+                ALTER TABLE sessions ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{}';
+                ALTER TABLE sessions ADD COLUMN provenance_indexed INTEGER NOT NULL DEFAULT 0;
+                CREATE INDEX sessions_kind_idx ON sessions(kind);
+                UPDATE metadata SET value = '3' WHERE key = 'schema_version';
+                PRAGMA user_version = 3;
                 COMMIT;
                 """
             )
@@ -428,7 +493,8 @@ class Storage(AbstractContextManager["Storage"]):
     def get_session_by_path(self, source: str, source_path: str) -> StoredSession | None:
         row = self.connection.execute(
             """
-            SELECT session_id, source, source_path, file_size, file_mtime_ns, missing
+            SELECT session_id, source, source_path, file_size, file_mtime_ns,
+                   missing, provenance_indexed
             FROM sessions WHERE source = ? AND source_path = ?
             """,
             (source, source_path),
@@ -438,7 +504,8 @@ class Storage(AbstractContextManager["Storage"]):
     def get_session(self, session_id: str) -> StoredSession | None:
         row = self.connection.execute(
             """
-            SELECT session_id, source, source_path, file_size, file_mtime_ns, missing
+            SELECT session_id, source, source_path, file_size, file_mtime_ns,
+                   missing, provenance_indexed
             FROM sessions WHERE session_id = ?
             """,
             (session_id,),
@@ -456,6 +523,7 @@ class Storage(AbstractContextManager["Storage"]):
             file_size=int(row["file_size"]),
             file_mtime_ns=int(row["file_mtime_ns"]),
             missing=bool(row["missing"]),
+            provenance_indexed=bool(row["provenance_indexed"]),
         )
 
     def existing_chunk_ids(self, session_id: str) -> set[str]:
@@ -531,6 +599,9 @@ class Storage(AbstractContextManager["Storage"]):
     ) -> None:
         """Atomically apply a fully prepared session delta."""
 
+        if session.kind not in SESSION_KINDS:
+            raise StorageError(f"Unknown session kind: {session.kind}")
+
         if new_chunks:
             if embedding_result is None:
                 raise StorageError("New chunks require embeddings")
@@ -567,10 +638,14 @@ class Storage(AbstractContextManager["Storage"]):
                 """
                 INSERT INTO sessions(
                     session_id, source, source_path, created_at, cwd, project, archived, missing,
-                    warning_count, file_size, file_mtime_ns, indexed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+                    warning_count, file_size, file_mtime_ns, indexed_at,
+                    kind, provenance_json, provenance_indexed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(session_id) DO UPDATE SET
                     source = excluded.source,
+                    kind = excluded.kind,
+                    provenance_json = excluded.provenance_json,
+                    provenance_indexed = 1,
                     source_path = excluded.source_path,
                     created_at = excluded.created_at,
                     cwd = excluded.cwd,
@@ -594,6 +669,8 @@ class Storage(AbstractContextManager["Storage"]):
                     file_size,
                     file_mtime_ns,
                     now,
+                    session.kind,
+                    json.dumps(dict(session.provenance), ensure_ascii=False, sort_keys=True),
                 ),
             )
 
@@ -744,6 +821,7 @@ class Storage(AbstractContextManager["Storage"]):
         self,
         *,
         source: str | None,
+        kind: str | None,
         project: str | None,
         since: str | None,
         until: str | None,
@@ -751,6 +829,11 @@ class Storage(AbstractContextManager["Storage"]):
     ) -> tuple[str, list[object]]:
         clauses: list[str] = []
         values: list[object] = []
+        if kind is not None:
+            if kind not in SESSION_KINDS:
+                raise StorageError(f"Unknown session kind: {kind}")
+            clauses.append(f"{prefix}.kind = ?")
+            values.append(kind)
         if source:
             clauses.append(f"{prefix}.source = ?")
             values.append(source)
@@ -771,12 +854,14 @@ class Storage(AbstractContextManager["Storage"]):
         *,
         limit: int,
         source: str | None = None,
+        kind: str | None = None,
         project: str | None = None,
         since: str | None = None,
         until: str | None = None,
     ) -> list[dict[str, Any]]:
         filters, values = self._filter_sql(
             source=source,
+            kind=kind,
             project=project,
             since=since,
             until=until,
@@ -794,7 +879,8 @@ class Storage(AbstractContextManager["Storage"]):
                         WHERE embedding MATCH ? AND k = ?
                         ORDER BY distance
                     )
-                    SELECT c.*, s.source, s.source_path, s.cwd, s.project, s.created_at,
+                    SELECT c.*, s.source, s.kind, s.provenance_json,
+                           s.source_path, s.cwd, s.project, s.created_at,
                            nearest.distance
                     FROM nearest
                     JOIN chunks c ON c.rowid = nearest.rowid
@@ -807,10 +893,7 @@ class Storage(AbstractContextManager["Storage"]):
                 )
             ]
 
-        pool = max(limit * 10, 100)
-        if not filters:
-            return query(pool)
-
+        pool = min(max(limit * 10, 100), MAX_VECTOR_K)
         eligible_count = int(
             self.connection.execute(
                 f"""
@@ -834,7 +917,27 @@ class Storage(AbstractContextManager["Storage"]):
             candidates = query(pool)
             if len(candidates) >= target_count or pool >= total_vectors:
                 return candidates
-            pool = min(pool * 4, total_vectors)
+            if pool >= MAX_VECTOR_K:
+                # vec0 caps k at 4096. Score the eligible subset directly when
+                # missing sessions or metadata filters require a larger global pool.
+                return [
+                    dict(row)
+                    for row in self.connection.execute(
+                        f"""
+                        SELECT c.*, s.source, s.kind, s.provenance_json,
+                               s.source_path, s.cwd, s.project, s.created_at,
+                               vec_distance_L2(e.embedding, ?) AS distance
+                        FROM chunks c
+                        JOIN sessions s ON s.session_id = c.session_id
+                        JOIN chunk_embeddings e ON e.rowid = c.rowid
+                        WHERE s.missing = 0 {filters}
+                        ORDER BY distance
+                        LIMIT ?
+                        """,
+                        (serialized_vector, *values, limit),
+                    )
+                ]
+            pool = min(pool * 4, total_vectors, MAX_VECTOR_K)
 
     def lexical_candidates(
         self,
@@ -842,12 +945,14 @@ class Storage(AbstractContextManager["Storage"]):
         *,
         limit: int,
         source: str | None = None,
+        kind: str | None = None,
         project: str | None = None,
         since: str | None = None,
         until: str | None = None,
     ) -> list[dict[str, Any]]:
         filters, values = self._filter_sql(
             source=source,
+            kind=kind,
             project=project,
             since=since,
             until=until,
@@ -856,7 +961,8 @@ class Storage(AbstractContextManager["Storage"]):
             dict(row)
             for row in self.connection.execute(
                 f"""
-                SELECT c.*, s.source, s.source_path, s.cwd, s.project, s.created_at,
+                SELECT c.*, s.source, s.kind, s.provenance_json,
+                       s.source_path, s.cwd, s.project, s.created_at,
                        bm25(chunks_fts) AS lexical_score
                 FROM chunks_fts
                 JOIN chunks c ON c.rowid = chunks_fts.rowid
@@ -872,7 +978,8 @@ class Storage(AbstractContextManager["Storage"]):
     def show_context(self, chunk_id: str, *, context: int) -> tuple[sqlite3.Row, list[TurnRecord]]:
         row = self.connection.execute(
             """
-            SELECT c.*, t.ordinal, s.source, s.source_path, s.cwd, s.project
+            SELECT c.*, t.ordinal, s.source, s.kind, s.provenance_json,
+                   s.source_path, s.cwd, s.project
             FROM chunks c
             JOIN turns t ON t.session_id = c.session_id AND t.turn_id = c.turn_id
             JOIN sessions s ON s.session_id = c.session_id

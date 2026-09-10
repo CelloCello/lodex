@@ -71,6 +71,7 @@ class Indexer:
         prune: bool = False,
         since: str | None = None,
         until: str | None = None,
+        force: bool = False,
     ) -> IndexSummary:
         if target is not None and prune:
             raise IndexingError("--prune cannot be combined with --session")
@@ -119,7 +120,9 @@ class Indexer:
         for current, candidate in enumerate(candidates, start=1):
             processed_path = candidate.path
             try:
-                processed_path, session, final_size, final_mtime_ns = self._load_session(candidate)
+                processed_path, session, final_size, final_mtime_ns = self._load_session(
+                    candidate, force=force
+                )
                 if processed_path != candidate.path:
                     seen_paths.discard(str(candidate.path))
                     seen_paths.add(str(processed_path))
@@ -199,6 +202,8 @@ class Indexer:
     def _load_session(
         self,
         candidate: SessionCandidate,
+        *,
+        force: bool = False,
     ) -> tuple[Path, SessionRecord | None, int, int]:
         """Read one session, following a single source-reported relocation."""
 
@@ -208,8 +213,10 @@ class Indexer:
                 initial_stat = current.stat()
                 stored = self.storage.get_session_by_path(self.source.name, str(current))
                 if (
-                    stored is not None
+                    not force
+                    and stored is not None
                     and not stored.missing
+                    and stored.provenance_indexed
                     and stored.file_size == initial_stat.st_size
                     and stored.file_mtime_ns == initial_stat.st_mtime_ns
                 ):
