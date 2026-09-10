@@ -894,9 +894,6 @@ class Storage(AbstractContextManager["Storage"]):
             ]
 
         pool = min(max(limit * 10, 100), MAX_VECTOR_K)
-        if not filters:
-            return query(pool)
-
         eligible_count = int(
             self.connection.execute(
                 f"""
@@ -922,7 +919,7 @@ class Storage(AbstractContextManager["Storage"]):
                 return candidates
             if pool >= MAX_VECTOR_K:
                 # vec0 caps k at 4096. Score the eligible subset directly when
-                # selective metadata filters would require a larger global pool.
+                # missing sessions or metadata filters require a larger global pool.
                 return [
                     dict(row)
                     for row in self.connection.execute(

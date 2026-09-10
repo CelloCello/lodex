@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lodex"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first retrieval for coding-agent session history"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,9 +19,9 @@ lodex = "lodex.cli:main"
 
 [dependency-groups]
 dev = [
-  "mypy>=1.15,<2",
-  "pytest>=8.3,<9",
-  "ruff>=0.11,<0.12",
+  "mypy>=2.3.1,<3",
+  "pytest>=9.1.1,<10",
+  "ruff>=0.16.6,<0.17",
 ]
 
 [tool.hatch.build.targets.wheel]

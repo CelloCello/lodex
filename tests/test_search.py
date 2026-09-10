@@ -82,7 +82,38 @@ def test_vector_kind_filter_expands_past_unrelated_origin_candidates(tmp_path: P
         assert [hit["session_id"] for hit in hits] == ["audit"]
 
 
-def test_selective_origin_filter_beyond_vec0_k_limit(tmp_path: Path) -> None:
+def test_unfiltered_search_expands_past_missing_candidates(tmp_path: Path) -> None:
+    with Storage(tmp_path / "missing-pool.db", dimension=3) as storage:
+        stale, project = session(
+            tmp_path / "stale.jsonl",
+            session_id="stale",
+            created_at="2026-09-01",
+            project="path:/project",
+            texts=[(f"Old task {i}", "Answer") for i in range(310)],
+        )
+        insert(storage, stale, project, [(1.0, 0.0, 0.0)] * 310)
+        live_path = tmp_path / "live.jsonl"
+        live, _ = session(
+            live_path,
+            session_id="live",
+            created_at="2026-09-01",
+            project=project,
+            texts=[("Current task", "Answer")],
+        )
+        insert(storage, live, project, [(0.0, 1.0, 0.0)])
+        storage.mark_missing({str(live_path)}, source="codex")
+        retrieval = Retrieval(storage, QueryEmbedder({"semanticneedle": (1.0, 0.0, 0.0)}))
+
+        assert [hit.session_id for hit in retrieval.search("semanticneedle")] == ["live"]
+        assert [hit.session_id for hit in retrieval.search("semanticneedle", source="codex")] == [
+            "live"
+        ]
+        storage.mark_missing(set(), source="codex")
+        assert retrieval.search("semanticneedle") == ()
+
+
+@pytest.mark.parametrize("exclude_missing", [False, True])
+def test_eligible_candidates_beyond_vec0_k_limit(tmp_path: Path, exclude_missing: bool) -> None:
     with Storage(tmp_path / "large-pool.db", dimension=3) as storage:
         direct, project = session(
             tmp_path / "direct.jsonl",
@@ -100,11 +131,13 @@ def test_selective_origin_filter_beyond_vec0_k_limit(tmp_path: Path) -> None:
             texts=[("Audit A", "Evidence"), ("Audit B", "More evidence")],
         )
         insert(storage, replace(audit, kind="audit"), project, [(0.0, 1.0, 0.0), (-1.0, 0.0, 0.0)])
+        if exclude_missing:
+            storage.mark_missing({str(tmp_path / "audit.jsonl")}, source="codex")
         hits = storage.vector_candidates(
             (1.0, 0.0, 0.0),
             limit=2,
-            kind="audit",
-            project=project,
+            kind=None if exclude_missing else "audit",
+            project=None if exclude_missing else project,
         )
         assert [hit["turn_id"] for hit in hits] == ["audit-turn-0", "audit-turn-1"]
         assert [hit["distance"] for hit in hits] == pytest.approx([2**0.5, 2])
