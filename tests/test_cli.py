@@ -138,10 +138,69 @@ def test_status_json_reports_real_counts_for_legacy_schema(
     assert status["database"]["turns"] == 1
     assert status["database"]["chunks"] == 1
     assert status["database"]["sources"] == {"codex": 1}
+    assert status["database"]["user_text_stats"]["nonempty_ratio"] == 1.0
     assert status["database"]["content_since"] == "2026-08-20T01:00:00Z"
     assert "requires migration" in status["database"]["error"]
     with sqlite3.connect(database) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_origin_fixtures_scoped_index_status_and_search(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake, sessions = configure_cli(monkeypatch, tmp_path)
+    (sessions / "completed.jsonl").unlink()
+    for name in ("approval-audit.jsonl", "automation.jsonl", "unknown-origin.jsonl"):
+        shutil.copy2(FIXTURES / name, sessions / name)
+    assert cli.main(["index", "--since", "2026-09-01", "--until", "2026-09-03", "--json"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert (summary["parsed_sessions"], summary["indexed_turns"]) == (3, 5)
+    assert cli.main(["status", "--json"]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["compatible"] is True
+    assert status["database"]["user_text_stats"] == {
+        "scope": "non_missing_sessions",
+        "total_turns": 5,
+        "nonempty_turns": 4,
+        "empty_turns": 1,
+        "nonempty_ratio": 0.8,
+    }
+    assert cli.main(["status"]) == 0
+    output = capsys.readouterr().out
+    assert "4/5 turns non-empty (80.00%), 1 empty" in output
+    assert "text presence does not prove completeness" in output
+    for query, session_id in (
+        ("ApprovalAuditFixture", "session-approval"),
+        ("AutomationFixture", "session-automation"),
+        ("UnknownOriginFixture", "session-unknown-origin"),
+    ):
+        assert cli.main(["search", query, "--lexical", "--json"]) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result["count"] > 0
+        assert {hit["session_id"] for hit in result["results"]} == {session_id}
+    calls = len(fake.document_calls)
+    assert (
+        cli.main(
+            ["index", "--force", "--session", str(sessions / "approval-audit.jsonl"), "--json"]
+        )
+        == 0
+    )
+    refresh = json.loads(capsys.readouterr().out)
+    assert refresh["parsed_sessions"] == 1
+    assert refresh["embedded_chunks"] == 0
+    assert len(fake.document_calls) == calls
+
+
+def test_status_user_text_unavailable_and_empty_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    configure_cli(monkeypatch, tmp_path)
+    assert cli.main(["status"]) == 0
+    assert "user text (non-missing sessions): unavailable" in capsys.readouterr().out
+    with Storage(tmp_path / "data" / "lodex.db", dimension=3):
+        pass
+    assert cli.main(["status"]) == 0
+    assert "0/0 turns non-empty (N/A), 0 empty" in capsys.readouterr().out
 
 
 def test_json_usage_error_and_rebuild_confirmation(

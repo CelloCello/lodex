@@ -10,6 +10,38 @@ from lodex.codex_parser import parse_codex_session
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+@pytest.mark.parametrize(
+    ("fixture", "users", "answers"),
+    [
+        (
+            "approval-audit.jsonl",
+            ["ApprovalAuditFixture: assess the proposed read of README.md."],
+            ["The proposed action only reads a project file."],
+        ),
+        (
+            "automation.jsonl",
+            ["AutomationFixture: summarize changes since the last check.", ""],
+            ["The parser now preserves requests.", "No additional changes."],
+        ),
+        (
+            "unknown-origin.jsonl",
+            ["UnknownOriginFixture: explain the decision."] * 2,
+            ["Keep retrieval local.", "Local storage supports offline retrieval."],
+        ),
+    ],
+)
+def test_transcript_origins_preserve_content_without_classification(
+    fixture: str, users: list[str], answers: list[str]
+) -> None:
+    session = parse_codex_session(FIXTURES / fixture)
+    assert [turn.user_text for turn in session.turns] == users
+    assert [turn.assistant_text for turn in session.turns] == answers
+    assert [turn.ordinal for turn in session.turns] == list(range(len(users)))
+    assert len({turn.turn_id for turn in session.turns}) == len(users)
+    assert all(turn.status == "completed" for turn in session.turns)
+    assert not session.warnings
+
+
 def test_response_only_users_preserve_legacy_boundaries_and_filter_blocks(tmp_path: Path) -> None:
     path = tmp_path / "response-only.jsonl"
     records = [

@@ -123,6 +123,17 @@ class ShowResult:
 
 
 @dataclass(frozen=True, slots=True)
+class UserTextStats:
+    """Stored text presence, not transcript completeness or human authorship."""
+
+    total_turns: int
+    nonempty_turns: int
+    empty_turns: int
+    nonempty_ratio: float | None
+    scope: Literal["non_missing_sessions"] = "non_missing_sessions"
+
+
+@dataclass(frozen=True, slots=True)
 class DatabaseStatus:
     """Schema, compatibility, and index counters for the local database."""
 
@@ -144,6 +155,7 @@ class DatabaseStatus:
     content_since: str | None = None
     content_until: str | None = None
     last_indexed_at: str | None = None
+    user_text_stats: UserTextStats | None = None
     error: str | None = None
 
 

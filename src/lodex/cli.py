@@ -146,6 +146,16 @@ def _print_status(
     )
     print(f"  agent sources: {source_counts or '-'}")
     print(f"  content range: {database.content_since or '-'} to {database.content_until or '-'}")
+    stats = database.user_text_stats
+    if stats is None:
+        print("  user text (non-missing sessions): unavailable")
+    else:
+        ratio = f"{stats.nonempty_ratio:.2%}" if stats.nonempty_ratio is not None else "N/A"
+        print(
+            f"  user text (non-missing sessions): {stats.nonempty_turns}/{stats.total_turns} "
+            f"turns non-empty ({ratio}), {stats.empty_turns} empty"
+        )
+    print("  Compatibility checks runtime/index format; text presence does not prove completeness.")
     if ollama.error:
         print(f"  Ollama error: {ollama.error}")
     if database.error:

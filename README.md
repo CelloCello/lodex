@@ -154,6 +154,21 @@ guarantee that every session between the bounds is present.
 Search and show results include the agent `source`. Status includes session
 counts grouped by source.
 
+Status also reports `database.user_text_stats` in JSON: `total_turns`,
+`nonempty_turns`, `empty_turns`, and `nonempty_ratio` (0–1), with scope
+`non_missing_sessions`. These counts cover stored turns in non-missing sessions,
+including archived sessions and all turn statuses. Empty and ASCII-whitespace-only
+text counts as empty; the parser strips surrounding whitespace before storage.
+The denominator differs from the existing `turns` counter, which includes missing
+sessions. With no eligible turns, counts are zero and the ratio is `null` (N/A in
+text output). If the database is absent or cannot be inspected, the whole stats
+object is `null` (unavailable).
+
+`compatible` describes runtime/index compatibility, not content completeness.
+Text presence does not establish human authorship or correct turn alignment;
+assistant-only turns can legitimately have empty user text. Reading these
+statistics requires no reindexing or schema migration.
+
 ## Configuration
 
 Lodex optionally reads `~/.config/lodex/config.toml`:

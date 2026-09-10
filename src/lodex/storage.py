@@ -24,6 +24,7 @@ from lodex.contracts import (
     EmbeddingResult,
     SessionRecord,
     TurnRecord,
+    UserTextStats,
 )
 
 SCHEMA_VERSION = 2
@@ -76,6 +77,23 @@ def _status_snapshot(
         table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
         for table in ("sessions", "turns", "chunks")
     }
+    user_text_counts = connection.execute(
+        """
+        SELECT COUNT(*) AS total_turns,
+               COALESCE(SUM(length(trim(t.user_text, char(9, 10, 11, 12, 13, 32))) > 0), 0)
+                   AS nonempty_turns
+        FROM turns t JOIN sessions s USING (session_id)
+        WHERE s.missing = 0
+        """
+    ).fetchone()
+    total_turns = int(user_text_counts["total_turns"])
+    nonempty_turns = int(user_text_counts["nonempty_turns"])
+    user_text_stats = UserTextStats(
+        total_turns=total_turns,
+        nonempty_turns=nonempty_turns,
+        empty_turns=total_turns - nonempty_turns,
+        nonempty_ratio=nonempty_turns / total_turns if total_turns else None,
+    )
     session_columns = {
         str(row["name"]) for row in connection.execute("PRAGMA table_info(sessions)")
     }
@@ -163,6 +181,7 @@ def _status_snapshot(
         turns=counts["turns"],
         chunks=counts["chunks"],
         sources=source_counts,
+        user_text_stats=user_text_stats,
         missing_sessions=missing,
         warnings=warnings,
         content_since=content_range["content_since"],

@@ -1,0 +1,8 @@
+{"type":"session_meta","payload":{"id":"session-approval","cwd":"/work/example","timestamp":"2026-09-01T01:00:00Z","thread_source":"guardian_review","source":{"subagent":{"other":"guardian"}}}}
+{"type":"event_msg","payload":{"type":"task_started","turn_id":"approval-one"}}
+{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"Internal approval policy"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /work/example\n<INSTRUCTIONS>Internal repository rules</INSTRUCTIONS>"},{"type":"input_text","text":"<environment_context>Internal working directory</environment_context>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"ApprovalAuditFixture: assess the proposed read of README.md."}]}}
+{"type":"event_msg","payload":{"type":"user_message","message":"ApprovalAuditFixture: assess the proposed read of README.md."}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"The proposed action only reads a project file."}]}}
+{"type":"event_msg","payload":{"type":"task_complete","turn_id":"approval-one"}}
