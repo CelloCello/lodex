@@ -7,13 +7,39 @@ description: Search locally indexed Codex session history for past discussions, 
 
 Use Lodex to recover concise, inspectable evidence from prior Codex sessions.
 
-## Command
+## Choose the query interface
+
+Prefer the configured `lodex` MCP server's `status`, `search`, and `show` tools in both
+normal tasks and side conversations. Discover those tools if tool search is available.
+Use the CLI workflow below only when Lodex MCP tools are unavailable, not to work around
+a denied tool call. Do not install or configure an MCP server during history retrieval.
+
+### MCP workflow
+
+1. Call `status`. Use hybrid search when the runtime and database are compatible.
+   If the database is unavailable/incompatible, or Ollama is unhealthy, report the
+   actionable error. Do not silently downgrade or try another interface after a denial.
+2. Call `search` with `query`, `project` set to the current task's **absolute project
+   path**, and `limit=5`. Never pass `current`, a relative path, or infer the project from
+   the MCP server's working directory. If the task has no known project, clarify the
+   scope. Use another project only when the user identifies it; use `project=null`
+   only for explicitly requested cross-project history.
+   - Preserve exact identifiers, error fragments, and file paths; use one or two short
+     variants for conceptual questions. Pass `since`/`until` for a requested date range.
+   - `lexical=true` is explicit keyword-only search, without Ollama. Use it only when
+     requested, or when the database is compatible and the error specifically establishes
+     sandbox-blocked loopback access. Disclose the loss of semantic retrieval.
+3. Call `show` for promising `chunk_id` values with `context=1`; expand only as needed.
+4. Answer with evidence, distinguishing recorded decisions from inference and conflicting
+   or inconclusive history. Keep results bounded; do not dump full transcripts.
+
+### CLI command
 
 Use `lodex` when it is available on `PATH`. Otherwise locate the local Lodex checkout and use
 `uv run --project <lodex-checkout> lodex` as the command prefix. Do not install a global package,
 modify shell startup files, or guess a checkout path that has not been verified.
 
-## Retrieval Workflow
+### CLI workflow
 
 1. Run `lodex status --json`. Use normal hybrid search when the Ollama runtime and database are compatible.
    - If the command is blocked with `Operation not permitted`, `unable to open database file`, or an equivalent sandbox permission error, request approval to retry that exact read-only Lodex command outside the sandbox. Explain that it only reads `~/.local/share/lodex` and connects to loopback Ollama.

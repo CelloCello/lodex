@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from lodex import cli
+from lodex import cli, queries
 from lodex.embedding import OllamaUnavailableError
 from lodex.storage import Storage, StorageCompatibilityError
 from tests.fakes import FakeEmbedder, downgrade_schema
@@ -62,7 +62,7 @@ def configure_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Fake
         model="test-model",
         digest="sha256:test",
     )
-    monkeypatch.setattr(cli, "OllamaEmbedder", lambda **_: fake)
+    monkeypatch.setattr(queries, "OllamaEmbedder", lambda **_: fake)
     return fake, sessions
 
 
@@ -288,7 +288,7 @@ def test_sqlite_error_is_rendered_as_json_without_traceback(
     def unavailable_storage(*_: object, **__: object) -> object:
         raise sqlite3.OperationalError("unable to open database file")
 
-    monkeypatch.setattr(cli, "Storage", unavailable_storage)
+    monkeypatch.setattr(queries, "Storage", unavailable_storage)
     assert cli.main(["show", "missing", "--json"]) == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["error"] == "unable to open database file"

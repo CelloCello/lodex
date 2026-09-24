@@ -11,25 +11,22 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Never
 
-from lodex import __version__
+from lodex import __version__, queries
 from lodex.config import AppConfig, ConfigurationError, load_config
 from lodex.contracts import SESSION_KINDS, DatabaseStatus, OllamaStatus, SearchResult, ShowResult
 from lodex.dates import DateRangeError
 from lodex.embedding import (
     EmbeddingConfigurationError,
     EmbeddingError,
-    OllamaEmbedder,
 )
 from lodex.indexer import Indexer, IndexingError, IndexRuntimeError
-from lodex.projects import project_identity
-from lodex.retrieval import Retrieval, RetrievalError, show_context
+from lodex.retrieval import RetrievalError
 from lodex.skill_install import install_skill, remove_skill
 from lodex.sources import CodexSessionSource
 from lodex.storage import (
     Storage,
     StorageCompatibilityError,
     StorageError,
-    database_status,
 )
 
 
@@ -82,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser = commands.add_parser("status", help="check runtime and index compatibility")
     status_parser.add_argument("--json", action="store_true", dest="as_json")
 
+    commands.add_parser("mcp", help="serve read-only status/search/show tools over MCP stdio")
+
     rebuild_parser = commands.add_parser("rebuild", help="reset the local index")
     rebuild_parser.add_argument("--yes", action="store_true")
     rebuild_parser.add_argument("--json", action="store_true", dest="as_json")
@@ -95,26 +94,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _configuration_failure(
-    host: str,
-    model: str,
-    dimension: int,
-    message: str,
-) -> OllamaStatus:
-    return OllamaStatus(
-        host=host,
-        reachable=False,
-        version=None,
-        model=model,
-        model_installed=False,
-        model_digest=None,
-        dimension=None,
-        expected_dimension=dimension,
-        compatible=False,
-        error=message,
-    )
-
-
 def _print_json(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, sort_keys=True))
 
@@ -122,16 +101,8 @@ def _print_json(value: object) -> None:
 def _print_status(
     ollama: OllamaStatus,
     database: DatabaseStatus,
-    *,
-    as_json: bool,
 ) -> None:
     compatible = ollama.compatible and database.compatible
-    if as_json:
-        payload = asdict(ollama)
-        payload["compatible"] = compatible
-        payload["database"] = asdict(database)
-        _print_json(payload)
-        return
     state = "compatible" if compatible else "incompatible"
     print(f"Lodex: {state}")
     print(f"  Ollama host: {ollama.host}")
@@ -175,16 +146,6 @@ def _error(command: str, message: str, *, as_json: bool) -> None:
         _print_json({"command": command, "error": message, "ok": False})
     else:
         print(f"lodex {command}: {message}", file=sys.stderr)
-
-
-def _resolved_project(value: str | None) -> str | None:
-    if value is None:
-        return None
-    if value == "current":
-        return project_identity(Path.cwd())
-    if value.startswith(("git:", "path:")):
-        return value
-    return project_identity(value)
 
 
 def _print_search(
@@ -233,37 +194,13 @@ def _print_show(result: ShowResult, *, as_json: bool) -> None:
             print(f"  Assistant: {turn.assistant_text}")
 
 
-def _embedder(config: AppConfig) -> OllamaEmbedder:
-    return OllamaEmbedder(
-        host=config.ollama_host,
-        model=config.ollama_model,
-        expected_dimension=config.embedding_dimension,
-    )
-
-
 def _status(config: AppConfig, *, as_json: bool) -> int:
-    configuration_error = False
-    try:
-        ollama = _embedder(config).status()
-    except EmbeddingConfigurationError as exc:
-        configuration_error = True
-        ollama = _configuration_failure(
-            config.ollama_host,
-            config.ollama_model,
-            config.embedding_dimension,
-            str(exc),
-        )
-    database = database_status(
-        config.db_path,
-        dimension=config.embedding_dimension,
-        provider="ollama",
-        model=config.ollama_model,
-        digest=ollama.model_digest,
-    )
-    _print_status(ollama, database, as_json=as_json)
-    if configuration_error:
-        return 2
-    return 0 if ollama.compatible and database.compatible else 1
+    report = queries.inspect_status(config)
+    if as_json:
+        _print_json(report.payload())
+    else:
+        _print_status(report.ollama, report.database)
+    return report.exit_code
 
 
 def _as_json(args: argparse.Namespace) -> bool:
@@ -322,7 +259,7 @@ def _run(args: argparse.Namespace, config: AppConfig) -> int:
         with Storage(config.db_path, dimension=config.embedding_dimension) as storage:
             summary = Indexer(
                 storage,
-                _embedder(config),
+                queries.create_embedder(config),
                 source=CodexSessionSource(config.codex_home),
                 progress=_index_progress,
             ).index(
@@ -344,38 +281,28 @@ def _run(args: argparse.Namespace, config: AppConfig) -> int:
         return 1 if summary.failed_sessions else 0
 
     if command == "search":
-        with Storage(
-            config.db_path,
-            dimension=config.embedding_dimension,
-            read_only=True,
-        ) as storage:
-            retrieval = Retrieval(storage, _embedder(config))
-            results = retrieval.search(
-                args.query,
-                source=args.source,
-                kind=args.kind,
-                project=_resolved_project(args.project),
-                since=args.since,
-                until=args.until,
-                limit=args.limit,
-                lexical_only=bool(args.lexical),
-            )
-            _print_search(
-                results,
-                query=args.query,
-                mode="lexical" if args.lexical else "hybrid",
-                as_json=as_json,
-            )
+        results = queries.search(
+            config,
+            args.query,
+            source=args.source,
+            kind=args.kind,
+            project=args.project,
+            since=args.since,
+            until=args.until,
+            limit=args.limit,
+            lexical_only=bool(args.lexical),
+        )
+        _print_search(
+            results,
+            query=args.query,
+            mode="lexical" if args.lexical else "hybrid",
+            as_json=as_json,
+        )
         return 0
 
     if command == "show":
-        with Storage(
-            config.db_path,
-            dimension=config.embedding_dimension,
-            read_only=True,
-        ) as storage:
-            result = show_context(storage, args.chunk_id, context=args.context)
-            _print_show(result, as_json=as_json)
+        result = queries.show(config, args.chunk_id, context=args.context)
+        _print_show(result, as_json=as_json)
         return 0
 
     raise AssertionError(f"Unhandled command: {command}")
@@ -394,6 +321,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if command == "skill":
             return _run_skill(args)
+        if command == "mcp":
+            from lodex.mcp_server import create_server
+
+            create_server().run(transport="stdio")
+            return 0
         config = load_config()
         return _run(args, config)
     except (

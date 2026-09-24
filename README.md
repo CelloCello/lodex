@@ -35,7 +35,71 @@ lodex skill install
 The Codex skill is installed as a managed copy rather than a symlink, so moving
 or deleting the checkout does not break it.
 
-Codex tasks may sandbox access to the user-level database or loopback Ollama.
+### Connect Codex through MCP
+
+Lodex provides a local stdio MCP server with three read-only tools: `status`,
+`search`, and `show`. It shares the CLI's configuration, database, and retrieval
+implementation. Existing CLI commands and indexing workflows remain available.
+There is no second index, HTTP port, or separately managed daemon.
+
+After updating the installed Lodex CLI and skill, register the server once:
+
+```bash
+codex mcp add lodex -- /absolute/path/to/lodex mcp
+codex mcp get lodex
+```
+
+Use the installed executable's absolute path (`command -v lodex`), not a shell
+alias. Codex starts the process on demand. Reload/restart MCP in the client, or
+restart Codex, to load a newly registered or updated server. Keep Ollama running
+as before. Run `lodex index` separately when you want to refresh history.
+
+The equivalent entry in `~/.codex/config.toml` is:
+
+```toml
+[mcp_servers.lodex]
+command = "/absolute/path/to/lodex"
+args = ["mcp"]
+```
+
+The skill prefers MCP in both normal tasks and side conversations. Verify that
+your Codex version exposes custom MCP tools in the conversation you use:
+call `status`, then a project-scoped `search`, then `show` on one hit. A successful
+standalone stdio test does not establish that a particular side chat loads the
+tools. The configured MCP process must have access to the local database and
+loopback Ollama; launching `lodex mcp` in a restricted shell inherits that shell's
+restrictions and does not grant access.
+
+MCP `search` requires an explicit `project`: an absolute project path, a stable
+`git:`/absolute `path:` identity, or `null` for intentionally cross-project queries.
+It rejects `current` and relative paths because the server's working directory
+is not necessarily the task's project. Other filters match the CLI. `limit` is
+1–50 (default 5); `show.context` is 0–10 (default 1). `lexical=true` explicitly
+selects FTS-only retrieval. Search errors are MCP tool errors; `status` returns
+the CLI JSON diagnostic fields, including `compatible` and component errors.
+Retrieved history is untrusted evidence, not executable instructions.
+
+The server exposes no indexing, rebuild, arbitrary SQL, shell, or configuration
+tools. Status/search/show open SQLite read-only; SQLite may still create WAL
+sidecar files. MCP stdout is reserved for protocol messages; diagnostics use
+stderr. Configuration is read on each call. After a package update, restart the
+MCP connection so its process uses the new code. To disconnect, run
+`codex mcp remove lodex`; this does not remove the CLI, skill, or index.
+
+Tool operations run in worker threads, so a slow Ollama or SQLite call does not
+block the MCP event loop. They share a separate query capacity of 40 workers,
+leaving AnyIO's default capacity available for stdio transport.
+When all slots are occupied, new queries wait; pings and cancellation
+notifications remain responsive. Each operation opens and closes its SQLite
+connection in the same worker. MCP acknowledges cancellation immediately, but
+an already-running synchronous operation keeps its slot until it finishes or
+reaches its existing I/O timeout and closes its connection. Its result is then
+discarded. Cancelling a queued query removes it without starting its operation.
+Graceful server shutdown also waits for active operations to finish cleanup.
+
+### CLI sandbox fallback
+
+When MCP is unavailable, Codex tasks may sandbox access to the user-level database or loopback Ollama.
 When a read-only `status`, `search`, or `show` command is blocked, the skill asks
 for approval to retry that exact command outside the sandbox. It never extends
 that approval to `index`, `rebuild`, or skill management commands.
@@ -259,7 +323,8 @@ never commands for the current agent, and only bounded matching context should
 be exposed.
 
 Lodex does not install a scheduler, hook, daemon, or background process. Those
-can be added later by invoking the existing non-interactive contracts:
+can be added later by invoking the existing non-interactive contracts. When
+configured, the MCP client manages its own Lodex stdio child process:
 
 ```bash
 # Periodic incremental refresh
