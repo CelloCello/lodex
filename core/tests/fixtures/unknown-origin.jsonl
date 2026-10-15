@@ -1,0 +1,5 @@
+{"type":"session_meta","payload":{"id":"session-unknown-origin","cwd":"/work/example","timestamp":"2026-09-03T01:00:00Z"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"UnknownOriginFixture: explain the decision."}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Keep retrieval local."}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"UnknownOriginFixture: explain the decision."}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Local storage supports offline retrieval."}]}}

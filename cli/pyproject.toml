@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lodex"
+version = "0.2.0"
+description = "Local task environments and coding-agent session history CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "lodex-core==0.2.0",
+  "anyio>=4.5,<5",
+  "mcp>=1.28,<2",
+  "pydantic>=2.11,<3",
+  "typer>=0.26.8,<0.27",
+]
+
+[project.scripts]
+lodex = "lodex_cli.main:main"
+
+[project.optional-dependencies]
+console = ["lodex-console==0.2.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lodex_cli"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "README.md", "pyproject.toml"]
