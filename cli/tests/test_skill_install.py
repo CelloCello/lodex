@@ -7,13 +7,22 @@ import pytest
 
 from lodex_cli import main as cli
 
-SKILL_CASES = [None, "lodex-worktree", "lodex-services", "lodex-project-setup"]
+SKILL_CASES = [None, "lodex-worktree", "lodex-services", "lodex-project-setup", "lodex-herdr"]
 
 
 def assert_skill_contents(target: Path, name: str) -> None:
     expected = {Path("SKILL.md")}
-    if name == "lodex-history":
+    if name in {"lodex-history", "lodex-herdr"}:
         expected.add(Path("agents/openai.yaml"))
+    if name == "lodex-herdr":
+        expected.update(
+            Path(relative)
+            for relative in (
+                "references/codex.md",
+                "assets/lodex-manager.config.toml",
+                "assets/lodex-worker.config.toml",
+            )
+        )
     assert {p.relative_to(target) for p in target.rglob("*") if p.is_file()} == expected
     assert f"name: {name}" in (target / "SKILL.md").read_text().splitlines()
     source = files("lodex_cli").joinpath("bundled_skills", name)
@@ -139,3 +148,24 @@ def test_skill_install_replaces_symlink_without_modifying_its_source(
     assert target.is_dir()
     assert not target.is_symlink()
     assert (source / "SKILL.md").read_text(encoding="utf-8") == "source"
+
+
+def test_herdr_skill_updates_changed_resources_without_installing_agent_profiles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    codex = tmp_path / ".codex"
+    codex.mkdir()
+    config = codex / "config.toml"
+    config.write_text('approval_policy = "on-request"\n', encoding="utf-8")
+    assert cli.main(["skill", "install", "lodex-herdr"]) == 0
+    target = tmp_path / ".agents" / "skills" / "lodex-herdr"
+    asset = target / "assets" / "lodex-worker.config.toml"
+    asset.write_text("local template edit", encoding="utf-8")
+
+    assert cli.main(["skill", "install", "lodex-herdr", "--dry-run"]) == 0
+    assert asset.read_text(encoding="utf-8") == "local template edit"
+    assert cli.main(["skill", "install", "lodex-herdr"]) == 0
+    assert_skill_contents(target, "lodex-herdr")
+    assert list(codex.iterdir()) == [config]
+    assert config.read_text(encoding="utf-8") == 'approval_policy = "on-request"\n'

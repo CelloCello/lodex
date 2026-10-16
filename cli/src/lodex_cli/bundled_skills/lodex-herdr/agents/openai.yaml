@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lodex + Herdr"
+  short_description: "Coordinate agents in isolated Lodex taskenvs"
+  default_prompt: "Use $lodex-herdr to check my setup and coordinate the requested work in Lodex taskenvs through Herdr."

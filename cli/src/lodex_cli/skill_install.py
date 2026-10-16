@@ -1,16 +1,16 @@
-"""Install, update, and remove the bundled Lodex history skill."""
+"""Install, update, and remove bundled Lodex skills and their resources."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib.resources import files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from shutil import rmtree
 from tempfile import TemporaryDirectory
 
 SKILL_NAME = "lodex-history"
-SKILL_NAMES = (SKILL_NAME, "lodex-worktree", "lodex-services", "lodex-project-setup")
-SKILL_FILES = (Path("SKILL.md"), Path("agents/openai.yaml"))
+SKILL_NAMES = (SKILL_NAME, "lodex-worktree", "lodex-services", "lodex-project-setup", "lodex-herdr")
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,11 +25,18 @@ def _bundled_files(skill_name: str) -> dict[Path, bytes]:
     if skill_name not in SKILL_NAMES:
         raise ValueError(f"Unknown bundled skill: {skill_name}")
     root = files("lodex_cli").joinpath("bundled_skills", skill_name)
-    return {
-        relative: root.joinpath(*relative.parts).read_bytes()
-        for relative in SKILL_FILES
-        if root.joinpath(*relative.parts).is_file()
-    }
+    contents: dict[Path, bytes] = {}
+
+    def collect(directory: Traversable, prefix: Path) -> None:
+        for child in directory.iterdir():
+            relative = prefix / child.name
+            if child.is_dir():
+                collect(child, relative)
+            elif child.is_file():
+                contents[relative] = child.read_bytes()
+
+    collect(root, Path())
+    return contents
 
 
 def _matches_existing(target: Path, expected: dict[Path, bytes]) -> bool:

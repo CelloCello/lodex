@@ -1,0 +1,28 @@
+# Template: render and review through references/codex.md before installing.
+# Replace both /REPLACE_WITH_* paths with observed absolute paths.
+approval_policy = "on-request"
+# Optional: route eligible manager approval requests to automatic review.
+# Enable only with user confirmation; review may deny requests or need user input.
+# This changes the reviewer, not the sandbox permissions. Keep workers unchanged.
+# approvals_reviewer = "auto_review"
+default_permissions = "lodex-manager"
+
+[features]
+network_proxy = true
+
+[permissions.lodex-manager]
+extends = ":workspace"
+
+[permissions.lodex-manager.filesystem]
+"/REPLACE_WITH_LODEX_HOME" = "write"
+
+[permissions.lodex-manager.filesystem.":workspace_roots"]
+".git" = "write"
+
+[permissions.lodex-manager.network]
+enabled = true
+
+# No public destinations are allowed by this template's active network proxy.
+# Review inherited domain rules; add only destinations needed by the project.
+[permissions.lodex-manager.network.unix_sockets]
+"/REPLACE_WITH_HERDR_SOCKET_PATH" = "allow"

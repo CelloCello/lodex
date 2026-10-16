@@ -192,7 +192,7 @@ All history commands above except `mcp` support `--json`; their output format is
 separate from management's `ok`/`result` envelope. More examples and filter semantics
 are in the [history command reference](docs/history.md#commands).
 
-### Codex skills
+### Agent skills
 
 Skills provide optional agent instructions around the CLI. Install or update one
 with `lodex skill install NAME`, and remove it with `lodex skill remove NAME`.
@@ -209,6 +209,7 @@ logs, coding, commits and cleanup. Console is used primarily to observe shared s
 | `lodex-worktree` | Create, attach, inspect and remove task environments through the CLI. |
 | `lodex-services` | Operate task environment services and inspect their state and logs. |
 | `lodex-project-setup` | Set up a repository's `.lodex/project.toml` recipe. |
+| `lodex-herdr` | Coordinate agents through Herdr in Lodex-owned taskenvs, with manager/worker permission setup. |
 
 ```bash
 lodex skill install lodex-worktree --dry-run
@@ -219,6 +220,22 @@ Skills are installed as managed copies, so moving or deleting the source checkou
 does not break them. Reinstalling an identical copy makes no change; an update
 replaces the whole installed skill, including local edits and stale files.
 For history MCP setup, see [Connect Codex through MCP](docs/history.md#connect-codex-through-mcp).
+
+For Herdr orchestration, install `lodex-herdr` and use it from a manager agent in
+a Herdr pane. Keep Herdr's own skill installed for its current CLI and interactive
+agent handling. Lodex owns worktree/service lifecycle; Herdr opens the checkout
+and runs the selected coding agent. The manager passes the worker's explicit
+permission configuration on every launch. The integration includes Codex profile
+templates and setup guidance; other agents require their own supported controls.
+Missing or changed permission settings are proposed for confirmation before they
+are applied. Skill installation itself does not change agent config, install
+Herdr, or launch agents. See the bundled [integration skill](cli/src/lodex_cli/bundled_skills/lodex-herdr/SKILL.md)
+and [Codex setup reference](cli/src/lodex_cli/bundled_skills/lodex-herdr/references/codex.md).
+
+```bash
+lodex skill install lodex-herdr --dry-run
+lodex skill install lodex-herdr
+```
 
 ## Configuration and storage
 
