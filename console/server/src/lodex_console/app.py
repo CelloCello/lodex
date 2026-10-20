@@ -81,7 +81,9 @@ def create_app(root: Path, token: str, port: int) -> FastAPI:
 
     @app.exception_handler(ManagementError)
     async def management_error(request: Request, exc: ManagementError) -> JSONResponse:
-        return error(exc.code, str(exc), 409 if exc.code == "busy" else 400)
+        return JSONResponse(
+            {"ok": False, "error": exc.as_dict()}, 409 if exc.code == "busy" else 400
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:

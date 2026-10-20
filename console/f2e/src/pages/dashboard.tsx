@@ -1,6 +1,7 @@
 import { Link, useSearchParams } from "react-router-dom";
 import { ArrowRight, ArrowUpRight, FolderGit2 } from "lucide-react";
 import { useConsole } from "@/lib/console";
+import { hasDuplicateProjectLabel, projectLabel } from "@/lib/projects";
 import {
   attentionReasons,
   environmentPath,
@@ -55,6 +56,12 @@ export function Dashboard() {
   );
   const projectLink = (id: string) =>
     `/environments?project=${encodeURIComponent(id)}`;
+  function projectName(id: string) {
+    const label = projectLabel(data.projects, id);
+    return hasDuplicateProjectLabel(data.projects, label)
+      ? `${label} (${id})`
+      : label;
+  }
   if (loading) return <Loading />;
   return (
     <>
@@ -114,9 +121,11 @@ export function Dashboard() {
                       key={project.id}
                       to={projectLink(project.id)}
                       className="distribution-row"
-                      aria-label={`${project.id}: ${summary}. View environments`}
+                      aria-label={`${projectLabel(data.projects, project.id)}${projectLabel(data.projects, project.id) !== project.id ? ` (${project.id})` : ""}: ${summary}. View environments`}
                     >
-                      <span className="distribution-project">{project.id}</span>
+                      <span className="distribution-project">
+                        {projectName(project.id)}
+                      </span>
                       <svg
                         className="distribution-bar"
                         viewBox="0 0 100 12"
@@ -199,10 +208,10 @@ export function Dashboard() {
                   className="focus-row"
                   key={task.id}
                   to={environmentPath(task)}
-                  aria-label={`${task.project} / ${taskLabel(task)}`}
+                  aria-label={`${projectName(task.project)} / ${taskLabel(task)}`}
                 >
                   <div>
-                    <small className="muted">{task.project}</small>
+                    <small className="muted">{projectName(task.project)}</small>
                     <strong>{taskLabel(task)}</strong>
                     <span
                       className={
@@ -260,7 +269,7 @@ export function Dashboard() {
                 >
                   <span>
                     <FolderGit2 size={17} />
-                    <strong>{project.id}</strong>
+                    <strong>{projectName(project.id)}</strong>
                   </span>
                   <span className="muted small">
                     {project.tasks.length

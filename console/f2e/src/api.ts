@@ -47,7 +47,13 @@ export type Detail = Task & {
   };
   configuration_error?: { code: string; message: string };
 };
-export type Project = { id: string; source_checkout: string; source: string };
+export type Project = {
+  id: string;
+  display_name?: string;
+  pinned?: boolean;
+  source_checkout: string;
+  source: string;
+};
 export type Overview = {
   projects: Project[];
   taskenvs: Task[];
@@ -57,6 +63,8 @@ export type Action = {
   action: string;
   target?: string;
   name?: string;
+  display_name?: string;
+  pinned?: boolean;
   path?: string;
   project?: string;
   ref?: string;
@@ -72,6 +80,15 @@ const fragment = new URLSearchParams(location.hash.slice(1));
 if (fragment.has("token")) {
   sessionStorage.setItem("lodex-token", fragment.get("token")!);
   history.replaceState(null, "", location.pathname);
+}
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+  }
 }
 
 export async function request<T>(
@@ -90,9 +107,10 @@ export async function request<T>(
   });
   const data = await response.json();
   if (!data.ok) {
-    throw new Error(
+    throw new ApiError(
       data.error?.message ||
         `Operation ${data.result?.state || "failed"}. Inspect its recorded result.`,
+      data.error?.details,
     );
   }
   return data.result as T;

@@ -14,9 +14,16 @@ APPLICATION_ID = 0x4C44584D
 
 
 class ManagementError(Exception):
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.details = details
+
+    def as_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"code": self.code, "message": str(self)}
+        if self.details:
+            result["details"] = self.details
+        return result
 
 
 def now() -> str:

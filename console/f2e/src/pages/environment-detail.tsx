@@ -15,6 +15,7 @@ import {
 import type { Action, Detail } from "@/api";
 import { useConsole } from "@/lib/console";
 import { worktreeKind } from "@/lib/environments";
+import { projectLabel } from "@/lib/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -76,7 +77,7 @@ export function EnvironmentDetail() {
 }
 
 function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
-  const { busy, perform } = useConsole();
+  const { data, busy, perform } = useConsole();
   const navigate = useNavigate();
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [logs, setLogs] = useState<{
@@ -134,7 +135,7 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
         to={`/environments?project=${encodeURIComponent(detail.project)}`}
       >
         <ArrowLeft size={14} />
-        {detail.project} environments
+        {projectLabel(data.projects, detail.project)} environments
       </Link>
       <div className="detail-heading">
         <div>

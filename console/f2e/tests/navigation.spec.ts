@@ -239,7 +239,9 @@ test("an empty registry directs users to project registration without disabling 
   ).toBeDisabled();
   await page.getByRole("link", { name: "Add project" }).click();
   await page.getByRole("button", { name: "Add project" }).click();
-  await expect(page.getByRole("dialog").getByLabel("ID")).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByLabel("Name", { exact: true }),
+  ).toBeVisible();
   await page.keyboard.press("Escape");
   await page
     .getByRole("navigation")

@@ -19,6 +19,9 @@ class Action(BaseModel):
 
     action: Literal[
         "project.add",
+        "project.rename",
+        "project.pin",
+        "project.delete",
         "worktree.create",
         "worktree.attach",
         "worktree.remove",
@@ -37,6 +40,8 @@ class Action(BaseModel):
     ]
     target: str | None = None
     name: str | None = None
+    display_name: str | None = None
+    pinned: bool = True
     path: str | None = None
     project: str | None = None
     ref: str | None = None
@@ -65,8 +70,20 @@ def execute(store: Registry, request: Action) -> Any:
     source = request.absolute_path("config") if request.config else None
     if action == "project.add":
         return worktrees.project_add(
-            store, request.require("name"), request.absolute_path("path"), source
+            store,
+            request.require("name"),
+            request.absolute_path("path"),
+            source,
+            project_name=request.display_name,
         )
+    if action == "project.rename":
+        return worktrees.project_update(
+            store, request.require("project"), request.require("display_name")
+        )
+    if action == "project.pin":
+        return worktrees.project_pin(store, request.require("project"), pinned=request.pinned)
+    if action == "project.delete":
+        return worktrees.project_delete(store, request.require("project"), yes=request.yes)
     if action == "worktree.create":
         return worktrees.create(
             store,

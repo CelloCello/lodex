@@ -125,9 +125,11 @@ fixture 的 Python 路徑固定為目前 workspace 的直譯器，測試途中�
 Console 自動挑選可用 port，終端 B 要保持開啟。
 
 1. 確認 Overview 沒有環境、側欄沒有專案、Secrets 為空；若出現既有專案，先停下並檢查啟動命令的 `LODEX_HOME`。
-2. 在側欄按 Add project，ID 填 `manual-demo`，Path 填剛才的 repo 絕對路徑；Options 中的 Config source 留空，按 Add。
+2. 在側欄 Projects 旁按「＋」，Path 填剛才的 repo 絕對路徑，Name 填 `Manual demo`；展開 Options，Project ID 改為 `manual-demo`，Config source 留空，按 Add。
+   專案選單或標題旁的 Edit 可以修改顯示名稱；後續 CLI 仍使用固定 ID `manual-demo`。
+   選單的 Pin／Unpin 應在重新整理後保留排序；專案已有環境時，Delete 應明確阻擋。
 3. 確認側欄有新專案，但仍沒有環境。點專案名稱，確認頁首來源路徑與 Details 中的設定來源。註冊不會自動 attach、prepare 或啟動服務。
-4. 按專案右側「＋ → New worktree」，Start from 填 `HEAD`，Branch 填 `manual/a`；Config source 留空，按 Create。
+4. 按 Manual demo 右側「＋ → New worktree」，Start from 填 `HEAD`，Branch 填 `manual/a`；Config source 留空，按 Create。
 5. 再建立 `manual/b`。開啟兩個環境，確認 ID、worktree 路徑不同，且沒有已啟動的服務。
 
 將環境 A／B 詳情頁顯示的 **ID 與 Path** 填入終端 A（Path 是 worktree 的絕對路徑；替換四個佔位字串）：
@@ -265,7 +267,7 @@ lx secret list
 
 ### 主 worktree：只能取消註冊，不能移除
 
-1. 按 `manual-demo` 右側「＋ → Use existing」，Path 填最初測試 repo，按 Register。
+1. 按 Manual demo 右側「＋ → Use existing」，Path 填最初測試 repo，按 Register。
 2. 詳情應標示 Main，Preview removal 按鈕應停用，並說明只有 Lodex 建立且仍存在的 worktree 可移除；repo 仍存在。
 3. 對它執行 Unregister，repo 與檔案仍應存在。不要對它執行 prepare 或啟動服務。
 

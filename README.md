@@ -126,6 +126,9 @@ command records and services. A worktree is the physical Git working directory;
 the environment record can remain after that directory is removed.
 Registering a project does not automatically register an environment for its main
 worktree. See the [shared terminology](docs/management.md#terminology).
+Projects can have an editable display name (`project add … --display-name TEXT`;
+`project rename ID NAME`). Commands and existing environments continue using the
+fixed project ID; older registrations display that ID until named.
 
 `project add` validates and keeps an existing `.lodex/project.toml`. If it is
 missing, it creates a minimal skeleton, or copies the recipe passed with

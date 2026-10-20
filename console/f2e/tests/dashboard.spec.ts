@@ -206,7 +206,12 @@ test("a project opens its list and inline details directly without writes", asyn
   await expect(page.locator(".project-details")).toContainText(
     "/projects/myapp/.lodex/project.toml",
   );
-  await expect(page.getByRole("button", { name: /edit/i })).toHaveCount(0);
+  await expect(
+    sidebar.getByRole("button", {
+      name: "Project menu for myapp",
+      exact: true,
+    }),
+  ).toBeVisible();
   await page.reload();
   await expect(page).toHaveTitle("myapp · Lodex");
   await expect(

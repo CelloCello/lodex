@@ -52,6 +52,41 @@ def test_empty_console_is_read_only_and_requires_local_auth(tmp_path: Path) -> N
         assert api.get("/openapi.json").status_code == 404
 
 
+def test_project_names_and_duplicate_links_cross_worker_boundary(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    worktrees.git(repo, "init", "-q")
+    with client(tmp_path / "registry") as api:
+        original = post(
+            api, action="project.add", name="stable", path=str(repo), display_name="Original"
+        )
+        renamed = post(api, action="project.rename", project="stable", display_name="新的專案")
+        assert renamed["id"] == "stable" and renamed["display_name"] == "新的專案"
+        assert renamed["source"] == original["source"]
+        assert api.get("/api/state").json()["result"]["projects"] == [renamed]
+        duplicate = api.post(
+            "/api/action", json={"action": "project.add", "name": "other", "path": str(repo)}
+        ).json()
+        assert not duplicate["ok"]
+        assert duplicate["error"]["details"] == {"existing_project": "stable"}
+        unchanged = post(
+            api, action="project.add", name="stable", path=str(repo), display_name="Ignored"
+        )
+        assert unchanged["already_registered"]
+        assert unchanged["display_name"] == "新的專案"
+        pinned = post(api, action="project.pin", project="stable")
+        assert pinned["pinned"] is True
+        assert api.get("/api/state").json()["result"]["projects"][0]["pinned"] is True
+        preview = post(api, action="project.delete", project="stable")
+        assert not preview["removed"]
+        assert len(api.get("/api/state").json()["result"]["projects"]) == 1
+        post(api, action="worktree.attach", project="stable", path=str(repo))
+        blocked = api.post(
+            "/api/action", json={"action": "project.delete", "project": "stable", "yes": True}
+        ).json()
+        assert blocked["error"]["code"] == "project_not_empty"
+
+
 def test_secret_submission_never_echoed_even_on_invalid_input(tmp_path: Path) -> None:
     with client(tmp_path / "state") as api:
         value = "synthetic-test-value"

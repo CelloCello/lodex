@@ -26,9 +26,21 @@ Older material may call the physical directory a *checkout*; this is not a fourt
 managed object. References to a source checkout in packaging instructions mean
 the repository's source working directory.
 
-Project registration data is currently read-only after creation. The project ID
-is also used by CLI commands and environment registrations; it is not a separately
-editable display name. Project pages show the source worktree, with the
+Projects have a fixed **ID** used by CLI commands, environment registrations and
+new worktree paths, plus an optional **display name**. The Console shows the name
+when present and falls back to the ID for older registrations. Names may contain
+spaces and Unicode, must contain 1-120 characters after trimming, and may not contain
+control characters. Names need not be unique; selectors show the fixed ID when
+it differs. `project rename PROJECT NAME` changes only the display name. Existing
+environments, paths, repository identity and configuration sources stay the same.
+`project pin PROJECT` and `project pin PROJECT --unpin` control persistent sidebar
+pinning. Older records without `pinned` are unpinned. `project delete PROJECT` previews
+removing a project registration; `--yes` confirms. Both stages reject projects with
+any environment registration, including missing worktrees. Delete does not remove
+repository files, Git worktrees, services or resource records. Remove environment
+registrations deliberately before deleting the empty project. Creation, attachment
+and project deletion share the registry lock to prevent orphan registrations.
+No database migration is needed. Project pages show the source worktree, with the
 configuration source under Details. Each worktree reads its own `.lodex/project.toml`;
 editing a source file does not synchronize other environments' configuration.
 
@@ -51,6 +63,8 @@ full ID or absolute path with `--target`, not the slug or short suffix alone.
 
 ```sh
 lodex project add app /absolute/repo --config /absolute/project.toml --json
+lodex project add another /absolute/another-repo --display-name "Another project" --json
+lodex project rename app "App development" --json
 lodex worktree create app --ref main --branch feature-one --json
 lodex worktree attach app /absolute/existing-worktree --json
 lodex context --target /absolute/worktree/subdirectory --json
@@ -78,6 +92,10 @@ worktrees, so editing the local copy is sufficient; the original `--config` file
 is not a continuing dependency. Repeated registration preserves the registered
 project identity/source and validates the target worktree's current recipe.
 Registry conflicts and a busy lock fail before creating configuration files.
+Repeated registration of the same ID and repository remains idempotent and returns
+`already_registered: true`; it preserves the current display name. Use `project rename`
+to edit it. Conflicts identify the existing project in the error message and
+`error.details.existing_project` so the Console can link to it.
 
 ID or absolute directory selects an environment. No session, branch, remote or
 global current environment is inferred. Two clones of the same remote are distinct
@@ -128,7 +146,10 @@ names, without a `secret:` prefix, and need no project, worktree or `--target`.
 
 | Command | Target | Purpose |
 | --- | --- | --- |
-| `project add NAME PATH [--config PATH]` | No | Register a repository, preserve its existing recipe or create/copy a missing one; does not attach a worktree. |
+| `project add NAME PATH [--config PATH] [--display-name TEXT]` | No | Register a repository; NAME is the fixed ID. Preserve its existing recipe or create/copy a missing one; does not attach a worktree. |
+| `project rename PROJECT NAME` | No | Change the display name using the fixed project ID; preserve environments and worktree paths. |
+| `project pin PROJECT [--unpin]` | No | Pin or unpin a project in Console navigation. |
+| `project delete PROJECT [--yes]` | No | Preview or delete an empty project registration; retain all files and other records. |
 | `project list` | No | List registered projects. |
 | `worktree create PROJECT --ref REF --branch BRANCH [--config PATH]` | No | Create a new branch and owned worktree from a Git ref, then register it; does not run prepare. |
 | `worktree attach PROJECT PATH [--config PATH]` | No | Register an existing worktree belonging to the project's local repository, including its main worktree. |

@@ -16,10 +16,12 @@ export function ConfirmationDialog({
   confirmation,
   onClose,
   onDone,
+  onCloseAutoFocus,
 }: {
   confirmation: Confirmation | null;
   onClose: () => void;
   onDone?: () => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const { perform, busy, error } = useConsole();
   const [force, setForce] = useState(false);
@@ -35,9 +37,11 @@ export function ConfirmationDialog({
       ? "Run cleanup"
       : action?.action === "secret.remove"
         ? "Remove secret"
-        : removing
-          ? "Remove worktree"
-          : "Unregister environment";
+        : action?.action === "project.delete"
+          ? "Delete project"
+          : removing
+            ? "Remove worktree"
+            : "Unregister environment";
   return (
     <Dialog
       open={!!confirmation}
@@ -54,6 +58,8 @@ export function ConfirmationDialog({
           returnFocus.current = document.activeElement as HTMLElement;
         }}
         onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          if (event.defaultPrevented) return;
           if (returnFocus.current?.isConnected) {
             event.preventDefault();
             returnFocus.current.focus();
@@ -67,6 +73,17 @@ export function ConfirmationDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="confirmation-scope">
+          {action?.action === "project.delete" && (
+            <div>
+              <strong>{String(preview.display_name)}</strong>
+              <p className="muted small">
+                Project ID <code>{String(preview.project)}</code>
+              </p>
+              <code className="break-value">
+                {String(preview.source_checkout)}
+              </code>
+            </div>
+          )}
           {preview.path != null && (
             <div>
               <span className="field-title">Worktree path</span>

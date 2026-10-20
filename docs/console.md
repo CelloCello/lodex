@@ -56,6 +56,9 @@ Attention includes unavailable worktrees, invalid configuration, failed/unknown
 services, and a latest command with a failed, interrupted or unknown outcome.
 Charts count recorded services, including stopped, transitional, unknown and legacy
 external records; they do not infer unrecorded services or historical trends.
+When project names repeat, Overview's Services, Activity and Projects include the
+fixed project ID beside each name. Unique names stay concise, and unnamed projects
+continue to show their ID. The sidebar uses the same rule to distinguish names.
 
 The sidebar keeps Overview, the project/environment tree and shared Secrets available
 on every page. Open an environment directly from its project. Each expanded project
@@ -66,6 +69,13 @@ opens the complete searchable/filterable list, with eight entries per page and
 pagination preserved in the URL. Unreadable branches fall back to a readable
 directory name or an unavailable-worktree label; the stable ID remains in details.
 
+The plus beside **Projects** opens **Add project**. Enter the repository's absolute
+**Path**; **Name** is suggested from its directory and can be edited. **Options**
+contains the suggested fixed **Project ID** and optional configuration source.
+The suggested ID avoids IDs already in the current list; server validation remains
+authoritative. Duplicate registration identifies the existing project and offers
+an **Open** action. Repeating registration does not rename an existing project.
+
 Each project's plus button opens **Add environment**, offering **New worktree**
 or **Use existing**. The latter registers an environment for an existing
 main or linked Git worktree from the same local repository, without copying code.
@@ -74,7 +84,16 @@ Registration does not implicitly prepare or start an environment.
 Click a project name to open its environment list; the chevron only expands or
 collapses the sidebar tree. The page combines the list with its source worktree
 path and **Details**, which reveals the configuration source. There is no separate
-information page or duplicate actions menu. Show all appears when the tree has
+information page. The project's menu offers **Edit** with a pencil icon, which updates the
+shared display name without changing the ID, environment relationships or paths.
+The same **Edit** action appears beside the project heading. **+ Environment**
+sits at the right of the table's filter toolbar, separate from project actions.
+**Pin** moves a project to the top of the sidebar; **Unpin** restores normal order.
+Pins are saved in the shared project record and survive reloads. **Delete** previews
+and confirms removal of an empty project registration. Projects with any registered
+environment, including unavailable worktrees, must have those registrations removed
+first. The Core checks this again when confirming; repository, worktrees and files remain.
+Names and IDs are both searchable. Show all appears when the tree has
 more than six results. Source information remains read-only.
 
 Project pages use `/environments?project=PROJECT_ID`; older `/projects/PROJECT_ID`

@@ -11,6 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useConsole } from "@/lib/console";
+import { projectLabel } from "@/lib/projects";
 import { Plus, FolderInput, GitBranchPlus, ArrowLeft } from "lucide-react";
 
 export function EnvironmentForm({
@@ -26,10 +27,35 @@ export function EnvironmentForm({
   onOpenChange?: (open: boolean) => void;
   onCloseAutoFocus?: (event: Event) => void;
 }) {
-  const { data, busy, perform, error } = useConsole();
+  const { data, busy, perform, error, errorDetails, setError } = useConsole();
+  const [submitted, setSubmitted] = useState(false);
+  const [projectPath, setProjectPath] = useState("");
+  const [projectName, setProjectName] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [existingProject, setExistingProject] = useState<string | null>(null);
+  const directory =
+    projectPath.trim().replace(/\/+$/, "").split("/").pop() || "";
+  const base = (
+    directory
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^[^a-z0-9]+/, "")
+      .replace(/-+$/, "") || "project"
+  ).slice(0, 64);
+  let suggestedId = base;
+  for (
+    let suffix = 2;
+    data.projects.some((item) => item.id === suggestedId);
+    suffix++
+  )
+    suggestedId = `${base.slice(0, 58)}-${suffix}`;
+  const conflictId =
+    existingProject ||
+    (submitted && typeof errorDetails?.existing_project === "string"
+      ? errorDetails.existing_project
+      : null);
   const [localOpen, setLocalOpen] = useState(false);
   const [choice, setChoice] = useState<"create" | "attach" | null>(null);
-  const [submitted, setSubmitted] = useState(false);
   const navigate = useNavigate();
   const open = controlledOpen ?? localOpen;
   const formKind = kind === "add" ? choice : kind;
@@ -38,6 +64,12 @@ export function EnvironmentForm({
     setLocalOpen(value);
     onOpenChange?.(value);
     setSubmitted(false);
+    setExistingProject(null);
+    if (!value) {
+      setProjectPath("");
+      setProjectName(null);
+      setProjectId(null);
+    }
     if (!value) setChoice(null);
   }
   const title =
@@ -51,6 +83,7 @@ export function EnvironmentForm({
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitted(true);
+    setExistingProject(null);
     const fields = Object.fromEntries(
       [...new FormData(e.currentTarget)].filter(([, value]) => value !== ""),
     ) as Record<string, string>;
@@ -62,6 +95,14 @@ export function EnvironmentForm({
       title,
     );
     if (result) {
+      if (
+        formKind === "project" &&
+        result.already_registered &&
+        typeof result.id === "string"
+      ) {
+        setExistingProject(result.id);
+        return;
+      }
       setOpen(false);
       if (formKind !== "project" && typeof result.id === "string")
         navigate(`/environments/${encodeURIComponent(result.id)}/services`);
@@ -130,18 +171,16 @@ export function EnvironmentForm({
                 Back
               </Button>
             )}
-            {formKind === "project" ? (
-              <label>
-                ID
-                <Input name="name" required />
-              </label>
-            ) : (
+            {formKind !== "project" && (
               <label>
                 Project
                 <select name="project" defaultValue={project}>
                   {data.projects.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.id}
+                      {projectLabel(data.projects, p.id)}
+                      {p.display_name && p.display_name !== p.id
+                        ? ` (${p.id})`
+                        : ""}
                     </option>
                   ))}
                 </select>
@@ -154,6 +193,14 @@ export function EnvironmentForm({
                   name="path"
                   required
                   placeholder="/Users/you/projects/repository"
+                  {...(formKind === "project"
+                    ? {
+                        value: projectPath,
+                        onChange: (
+                          event: React.ChangeEvent<HTMLInputElement>,
+                        ) => setProjectPath(event.target.value),
+                      }
+                    : {})}
                 />
               </label>
             ) : (
@@ -172,8 +219,42 @@ export function EnvironmentForm({
                 </label>
               </>
             )}
+            {formKind === "project" && (
+              <label>
+                Name
+                <Input
+                  name="display_name"
+                  value={projectName ?? directory}
+                  onChange={(event) => setProjectName(event.target.value)}
+                  required
+                  maxLength={120}
+                />
+              </label>
+            )}
             <details className="form-options">
               <summary>Options</summary>
+              {formKind === "project" && (
+                <label>
+                  Project ID
+                  <Input
+                    name="name"
+                    value={projectId ?? suggestedId}
+                    onChange={(event) => setProjectId(event.target.value)}
+                    required
+                    pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
+                    maxLength={64}
+                    onInvalid={(event) => {
+                      const options = event.currentTarget.closest("details");
+                      if (options) options.open = true;
+                    }}
+                  />
+                </label>
+              )}
+              {formKind === "project" && (
+                <p className="muted small">
+                  Used by the CLI. Cannot be changed after creation.
+                </p>
+              )}
               <label>
                 Config source{" "}
                 <span className="muted font-normal">Optional</span>
@@ -189,6 +270,24 @@ export function EnvironmentForm({
             {submitted && error && (
               <p className="feedback feedback-error" role="alert">
                 {error}
+              </p>
+            )}
+            {conflictId && (
+              <p className="small">
+                {existingProject && "This repository is already registered. "}
+                <Button
+                  type="button"
+                  variant="link"
+                  onClick={() => {
+                    setError("");
+                    setOpen(false);
+                    navigate(
+                      `/environments?project=${encodeURIComponent(conflictId)}`,
+                    );
+                  }}
+                >
+                  Open {projectLabel(data.projects, conflictId)}
+                </Button>
               </p>
             )}
             <div className="actions justify-end">

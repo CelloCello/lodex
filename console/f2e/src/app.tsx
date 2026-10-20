@@ -6,6 +6,7 @@ import {
   Routes,
   matchPath,
   useLocation,
+  useNavigate,
 } from "react-router-dom";
 import {
   Check,
@@ -36,10 +37,18 @@ import {
 import { EnvironmentForm } from "@/components/environment-form";
 import { taskLabel } from "@/components/shared";
 import { useTheme, type Theme } from "@/lib/theme";
+import { projectLabel } from "@/lib/projects";
+import { ProjectNameDialog } from "@/components/project-name-dialog";
+import {
+  ConfirmationDialog,
+  type Confirmation,
+} from "@/components/confirmation";
 
 export function App() {
   const { theme, changeTheme } = useTheme();
   const location = useLocation();
+  const navigate = useNavigate();
+  const [deletion, setDeletion] = useState<Confirmation | null>(null);
   const target = matchPath("/environments/:id/*", location.pathname)?.params.id;
   const projectTarget = matchPath("/projects/:id", location.pathname)?.params
     .id;
@@ -51,9 +60,13 @@ export function App() {
   const state = useConsoleState(target);
   const [menu, setMenu] = useState(false);
   const [form, setForm] = useState<{
-    kind: "add" | "project";
+    kind: "add" | "project" | "rename";
     project?: string;
   } | null>(null);
+  const editingProject =
+    form?.kind === "rename"
+      ? state.data.projects.find((project) => project.id === form.project)
+      : undefined;
   const projectNavigation = useProjectNavigation(
     state.data,
     target,
@@ -62,6 +75,11 @@ export function App() {
   const main = useRef<HTMLElement>(null);
   const mobileMenu = useRef<HTMLButtonElement>(null);
   const formTrigger = useRef<HTMLElement | null>(null);
+  function editProject(project: string, trigger: HTMLButtonElement) {
+    formTrigger.current = menu ? mobileMenu.current : trigger;
+    setMenu(false);
+    setForm({ kind: "rename", project });
+  }
   const section = location.pathname.startsWith("/projects")
     ? "Projects"
     : location.pathname.startsWith("/secrets")
@@ -76,12 +94,13 @@ export function App() {
     main.current?.focus({ preventScroll: true });
   }, [section, target, projectTarget]);
   useEffect(() => {
-    document.title = `${selectedProject || (target && state.detail?.id === target ? taskLabel(state.detail) : section)} · Lodex`;
+    document.title = `${selectedProject ? projectLabel(state.data.projects, selectedProject) : target && state.detail?.id === target ? taskLabel(state.detail) : section} · Lodex`;
   }, [
     section,
     target,
     projectTarget,
     selectedProject,
+    state.data.projects,
     state.detail?.branch,
     state.detail?.id,
     state.detail?.path,
@@ -110,6 +129,25 @@ export function App() {
         formTrigger.current = menu ? mobileMenu.current : trigger;
         setMenu(false);
         setForm({ kind: "project" });
+      }}
+      onEdit={editProject}
+      onPin={(project, pinned) => {
+        void state.perform(
+          { action: "project.pin", project, pinned },
+          pinned ? "Pin project" : "Unpin project",
+        );
+      }}
+      onDelete={async (project, trigger) => {
+        formTrigger.current = menu ? mobileMenu.current : trigger;
+        setMenu(false);
+        const action = { action: "project.delete", project };
+        const preview = await state.perform(
+          action,
+          "Preview project deletion",
+          true,
+        );
+        if (preview) setDeletion({ action, preview });
+        else formTrigger.current?.focus();
       }}
     />
   );
@@ -171,13 +209,15 @@ export function App() {
                     className="breadcrumb-project"
                     to={`/environments?project=${encodeURIComponent(state.detail.project)}`}
                   >
-                    {state.detail.project}
+                    {projectLabel(state.data.projects, state.detail.project)}
                   </Link>
                 </>
               )}
               {selectedProject && !target && (
                 <>
-                  <span className="breadcrumb-current">{selectedProject}</span>
+                  <span className="breadcrumb-current">
+                    {projectLabel(state.data.projects, selectedProject)}
+                  </span>
                 </>
               )}
               {target && (
@@ -260,7 +300,10 @@ export function App() {
             )}
             <Routes>
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/environments" element={<Environments />} />
+              <Route
+                path="/environments"
+                element={<Environments onEdit={editProject} />}
+              />
               <Route
                 path="/environments/:id/:tab?"
                 element={<EnvironmentDetail />}
@@ -313,7 +356,32 @@ export function App() {
             {navigation}
           </DialogContent>
         </Dialog>
-        {form && (
+        <ConfirmationDialog
+          confirmation={deletion}
+          onClose={() => setDeletion(null)}
+          onDone={() => {
+            if (selectedProject === deletion?.action.project)
+              navigate("/dashboard");
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (formTrigger.current?.isConnected) formTrigger.current.focus();
+            else main.current?.focus();
+          }}
+        />
+        {editingProject && (
+          <ProjectNameDialog
+            key={editingProject.id}
+            project={editingProject}
+            onClose={() => setForm(null)}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              if (formTrigger.current?.isConnected) formTrigger.current.focus();
+              else main.current?.focus();
+            }}
+          />
+        )}
+        {form && form.kind !== "rename" && (
           <EnvironmentForm
             key={`${form.kind}:${form.project || ""}`}
             kind={form.kind}

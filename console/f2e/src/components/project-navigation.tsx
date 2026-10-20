@@ -1,5 +1,7 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
+import { DropdownMenu } from "radix-ui";
+import { hasDuplicateProjectLabel, projectLabel } from "@/lib/projects";
 import {
   ChevronDown,
   ChevronRight,
@@ -9,7 +11,12 @@ import {
   KeyRound,
   LayoutDashboard,
   Plus,
+  MoreHorizontal,
   Search,
+  Pencil,
+  Pin,
+  PinOff,
+  Trash2,
 } from "lucide-react";
 import type { Overview } from "@/api";
 import { taskLabel } from "@/components/shared";
@@ -32,7 +39,10 @@ export function useProjectNavigation(
   const project =
     selectedProject ||
     data.taskenvs.find((task) => task.id === target)?.project;
-  const first = data.projects[0]?.id || data.taskenvs[0]?.project;
+  const first =
+    data.projects.find((project) => project.pinned)?.id ||
+    data.projects[0]?.id ||
+    data.taskenvs[0]?.project;
   useEffect(() => {
     const id = project || first;
     if (id)
@@ -63,6 +73,9 @@ export function ProjectNavigation({
   onNavigate,
   onAdd,
   onRegister,
+  onEdit,
+  onPin,
+  onDelete,
   busy,
 }: {
   data: Overview;
@@ -71,16 +84,26 @@ export function ProjectNavigation({
   onNavigate: () => void;
   onAdd: (project: string, trigger: HTMLButtonElement) => void;
   onRegister: (trigger: HTMLButtonElement) => void;
+  onEdit: (project: string, trigger: HTMLButtonElement) => void;
+  onPin: (project: string, pinned: boolean) => void;
+  onDelete: (project: string, trigger: HTMLButtonElement) => void;
   busy: boolean;
 }) {
   const { search, setSearch, expanded, toggle, project } = navigation;
   const prefix = useId();
+  const menuTriggers = useRef(new Map<string, HTMLButtonElement>());
+  const editing = useRef(false);
+  const pinnedIds = new Set(
+    data.projects
+      .filter((project) => project.pinned)
+      .map((project) => project.id),
+  );
   const ids = [
     ...new Set([
       ...data.projects.map((p) => p.id),
       ...data.taskenvs.map((t) => t.project),
     ]),
-  ];
+  ].sort((a, b) => Number(pinnedIds.has(b)) - Number(pinnedIds.has(a)));
   return (
     <div className="project-navigation">
       <nav className="primary-navigation" aria-label="Main navigation">
@@ -99,13 +122,28 @@ export function ProjectNavigation({
         />
       </div>
       <div className="project-tree" aria-label="Projects and environments">
-        <h2 className="tree-heading">Projects</h2>
+        <div className="tree-heading-row">
+          <h2 className="tree-heading">Projects</h2>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Add a project"
+            title="Add project"
+            disabled={busy}
+            onClick={(event) => onRegister(event.currentTarget)}
+          >
+            <Plus />
+          </Button>
+        </div>
         {ids.map((id, index) => {
+          const label = projectLabel(data.projects, id);
+          const identity = label === id ? id : `${label} (${id})`;
+          const ambiguous = hasDuplicateProjectLabel(data.projects, label);
           const tasks = data.taskenvs
             .filter(
               (task) =>
                 task.project === id &&
-                `${id} ${task.branch || "detached"} ${task.path} ${task.id}`
+                `${id} ${label} ${task.branch || "detached"} ${task.path} ${task.id}`
                   .toLowerCase()
                   .includes(search.toLowerCase()),
             )
@@ -113,7 +151,7 @@ export function ProjectNavigation({
           if (
             search &&
             !tasks.length &&
-            !id.toLowerCase().includes(search.toLowerCase())
+            !`${id} ${label}`.toLowerCase().includes(search.toLowerCase())
           )
             return null;
           const open = expanded.has(id) || !!search;
@@ -134,25 +172,113 @@ export function ProjectNavigation({
                 <Link
                   className="tree-project-link"
                   to={`/environments?project=${encodeURIComponent(id)}`}
-                  aria-label={`Open project ${id}`}
+                  aria-label={`Open project ${identity}`}
                   aria-current={!target && project === id ? "page" : undefined}
                   onClick={onNavigate}
-                  title={id}
+                  title={identity}
                 >
                   <FolderGit2 />
-                  <span>{id}</span>
+                  <span>
+                    <span>{label}</span>
+                    {ambiguous && <small>{id}</small>}
+                  </span>
+                  {pinnedIds.has(id) && (
+                    <Pin className="project-pin" aria-label="Pinned" />
+                  )}
                 </Link>
                 {data.projects.some((project) => project.id === id) && (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Add environment to ${id}`}
-                    title="Add environment"
-                    disabled={busy}
-                    onClick={(event) => onAdd(id, event.currentTarget)}
-                  >
-                    <Plus />
-                  </Button>
+                  <>
+                    <DropdownMenu.Root modal={false}>
+                      <DropdownMenu.Trigger asChild>
+                        <Button
+                          ref={(node) => {
+                            if (node) menuTriggers.current.set(id, node);
+                            else menuTriggers.current.delete(id);
+                          }}
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Project menu for ${identity}`}
+                          title="Project menu"
+                          className="project-menu-trigger"
+                          aria-disabled={busy}
+                          onPointerDown={(event) => {
+                            if (busy) event.preventDefault();
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              busy &&
+                              ["Enter", " ", "ArrowDown"].includes(event.key)
+                            )
+                              event.preventDefault();
+                          }}
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenu.Trigger>
+                      <DropdownMenu.Portal>
+                        <DropdownMenu.Content
+                          className="project-menu"
+                          align="end"
+                          sideOffset={4}
+                          onCloseAutoFocus={(event) => {
+                            if (editing.current) {
+                              event.preventDefault();
+                              editing.current = false;
+                            }
+                          }}
+                        >
+                          <DropdownMenu.Item
+                            className="project-menu-item"
+                            onSelect={() => {
+                              const trigger = menuTriggers.current.get(id);
+                              if (trigger) {
+                                editing.current = true;
+                                onEdit(id, trigger);
+                              }
+                            }}
+                          >
+                            <Pencil aria-hidden="true" />
+                            Edit
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item
+                            className="project-menu-item"
+                            onSelect={() => onPin(id, !pinnedIds.has(id))}
+                          >
+                            {pinnedIds.has(id) ? (
+                              <PinOff aria-hidden="true" />
+                            ) : (
+                              <Pin aria-hidden="true" />
+                            )}
+                            {pinnedIds.has(id) ? "Unpin" : "Pin"}
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Separator className="project-menu-separator" />
+                          <DropdownMenu.Item
+                            className="project-menu-item text-destructive"
+                            onSelect={() => {
+                              const trigger = menuTriggers.current.get(id);
+                              if (trigger) {
+                                editing.current = true;
+                                onDelete(id, trigger);
+                              }
+                            }}
+                          >
+                            <Trash2 aria-hidden="true" />
+                            Delete
+                          </DropdownMenu.Item>
+                        </DropdownMenu.Content>
+                      </DropdownMenu.Portal>
+                    </DropdownMenu.Root>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Add environment to ${identity}`}
+                      title="Add environment"
+                      disabled={busy}
+                      onClick={(event) => onAdd(id, event.currentTarget)}
+                    >
+                      <Plus />
+                    </Button>
+                  </>
                 )}
               </div>
               <div id={region} className="tree-children" hidden={!open}>
@@ -165,7 +291,7 @@ export function ProjectNavigation({
                       className={`tree-checkout${task.id === target ? " selected" : ""}`}
                       to={environmentPath(task)}
                       aria-current={task.id === target ? "page" : undefined}
-                      aria-label={`Open ${taskLabel(task)} in ${id}`}
+                      aria-label={`Open ${taskLabel(task)} in ${identity}`}
                       title={`${taskLabel(task)} · ${task.path}`}
                       onClick={onNavigate}
                     >
@@ -221,7 +347,7 @@ export function ProjectNavigation({
         {!!ids.length &&
           search &&
           !ids.some((id) =>
-            `${id} ${data.taskenvs
+            `${id} ${projectLabel(data.projects, id)} ${data.taskenvs
               .filter((task) => task.project === id)
               .map((task) => `${task.branch} ${task.path} ${task.id}`)
               .join(" ")}`
@@ -240,16 +366,6 @@ export function ProjectNavigation({
             Secrets
           </NavLink>
         </nav>
-        <Button
-          className="register-project"
-          variant="ghost"
-          aria-label="Add a project"
-          disabled={busy}
-          onClick={(event) => onRegister(event.currentTarget)}
-        >
-          <Plus />
-          Add project
-        </Button>
         <p className="muted small">Shared with your CLI.</p>
       </div>
     </div>

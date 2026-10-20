@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -7,6 +9,57 @@ import pytest
 from lodex_core.management import project_config, worktrees
 from lodex_core.management.common import ManagementError
 from lodex_core.management.store import Registry
+
+
+def test_pin_and_delete_only_empty_project_registrations(registry: Registry, repo: Path) -> None:
+    original = worktrees.project_add(registry, "fixture", repo, None, project_name="Project")
+    files = {
+        path.relative_to(repo): path.read_bytes() for path in repo.rglob("*") if path.is_file()
+    }
+    pinned = worktrees.project_pin(registry, "fixture", pinned=True)
+    assert pinned["pinned"] is True
+    assert pinned["source"] == original["source"]
+    assert worktrees.project_pin(registry, "fixture", pinned=False)["pinned"] is False
+    preview = worktrees.project_delete(registry, "fixture", yes=False)
+    assert preview["project"] == "fixture" and not preview["removed"]
+    assert registry.get("project", "fixture")["display_name"] == "Project"
+    task = worktrees.attach(registry, "fixture", repo)
+    for execute in [False, True]:
+        with pytest.raises(ManagementError) as blocked:
+            worktrees.project_delete(registry, "fixture", yes=execute)
+        assert blocked.value.code == "project_not_empty"
+    assert registry.get("taskenv", task["id"]) == task
+    worktrees.forget(registry, task, yes=True)
+    with registry.lock("registry"), pytest.raises(ManagementError) as busy:
+        worktrees.project_delete(registry, "fixture", yes=True)
+    assert busy.value.code == "busy"
+    assert worktrees.project_delete(registry, "fixture", yes=True)["removed"] is True
+    assert registry.all("project") == []
+    assert {
+        path.relative_to(repo): path.read_bytes() for path in repo.rglob("*") if path.is_file()
+    } == files
+
+
+def test_create_checks_project_after_acquiring_registry_lock(
+    registry: Registry, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktrees.project_add(registry, "fixture", repo, None)
+    original_lock = registry.lock
+
+    @contextmanager
+    def delete_before_lock(key: str) -> Iterator[None]:
+        if key.startswith("project-"):
+            worktrees.project_delete(registry, "fixture", yes=True)
+        with original_lock(key):
+            yield
+
+    monkeypatch.setattr(registry, "lock", delete_before_lock)
+    with pytest.raises(ManagementError) as deleted:
+        worktrees.create(registry, "fixture", "HEAD", "must-not-exist")
+    assert deleted.value.code == "not_found"
+    assert registry.all("taskenv") == []
+    assert worktrees.git(repo, "branch", "--list", "must-not-exist") == ""
+    assert not (registry.root / "projects").exists()
 
 
 def test_project_add_copies_source_and_uses_local_recipe(registry: Registry, repo: Path) -> None:
@@ -28,6 +81,57 @@ def test_project_add_copies_source_and_uses_local_recipe(registry: Registry, rep
     source.unlink()
     tree = worktrees.create(registry, "fixture", "HEAD", "local-source")
     assert (Path(tree["path"]) / project_config.CONFIG).read_text() == config.read_text()
+
+
+def test_display_name_preserves_legacy_identity_and_repeated_registration(
+    registry: Registry, repo: Path
+) -> None:
+    original = worktrees.project_add(registry, "fixture", repo, None)
+    assert "display_name" not in original
+    task = worktrees.attach(registry, "fixture", repo)
+    renamed = worktrees.project_update(registry, "fixture", "  中文 Project  ")
+    assert renamed["display_name"] == "中文 Project"
+    assert {key: value for key, value in renamed.items() if key != "display_name"} == {
+        key: value for key, value in original.items() if key != "configuration"
+    }
+    assert registry.get("taskenv", task["id"]) == task
+    reader = Registry(registry.root, read_only=True)
+    try:
+        assert reader.get("project", "fixture") == renamed
+    finally:
+        reader.close()
+    repeated = worktrees.project_add(registry, "fixture", repo, None, project_name="Ignored")
+    assert repeated["already_registered"] is True
+    assert repeated["display_name"] == "中文 Project"
+    created = worktrees.create(registry, "fixture", "HEAD", "after-rename")
+    assert created["project"] == "fixture"
+    assert Path(created["path"]).parent == registry.root / "projects" / "fixture"
+    with pytest.raises(ManagementError) as duplicate:
+        worktrees.project_add(registry, "other-id", repo, None)
+    assert duplicate.value.details == {"existing_project": "fixture"}
+    assert "中文 Project" in str(duplicate.value)
+
+
+@pytest.mark.parametrize(
+    "invalid", ["", "   ", "bad\nname", "bad\x00name", "bad\x85name", "x" * 121]
+)
+def test_invalid_display_name_does_not_change_registration(
+    registry: Registry, repo: Path, invalid: str
+) -> None:
+    worktrees.project_add(registry, "fixture", repo, None, project_name="Original")
+    before = registry.get("project", "fixture")
+    with pytest.raises(ManagementError) as rejected:
+        worktrees.project_update(registry, "fixture", invalid)
+    assert rejected.value.code == "invalid_name"
+    assert registry.get("project", "fixture") == before
+
+
+def test_name_update_respects_registry_lock(registry: Registry, repo: Path) -> None:
+    worktrees.project_add(registry, "fixture", repo, None)
+    with registry.lock("registry"), pytest.raises(ManagementError) as busy:
+        worktrees.project_update(registry, "fixture", "Updated")
+    assert busy.value.code == "busy"
+    assert "display_name" not in registry.get("project", "fixture")
 
 
 @pytest.mark.parametrize("invalid", [False, True])

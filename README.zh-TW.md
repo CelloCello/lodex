@@ -115,6 +115,9 @@ Console 與 CLI 共用管理狀態，並內附建置好的前端資源，一般�
 Worktree 是實際的 Git 工作目錄，包含主工作目錄與額外建立的 linked worktree；
 目錄移除後，任務環境紀錄仍可保留。註冊專案時，不會自動為主工作目錄註冊任務環境。
 完整定義見[用語對照](docs/management.md#terminology)。
+專案可設定顯示名稱（`project add … --display-name TEXT`、`project rename ID NAME`）；
+修改名稱不會變更 CLI 使用的固定 ID、既有環境關聯或 worktree 路徑。
+舊專案未設定名稱時，繼續顯示 ID。
 
 `project add` 會驗證並保留既有的 `.lodex/project.toml`；若檔案不存在，
 則建立最小設定骨架，或複製 `--config PATH` 指定的設定檔。

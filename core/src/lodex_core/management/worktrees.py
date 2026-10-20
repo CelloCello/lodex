@@ -7,6 +7,7 @@ import os
 import re
 import socket
 import subprocess
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any
@@ -47,8 +48,65 @@ def identity(path: Path) -> dict[str, Any]:
     }
 
 
-def project_add(registry: Registry, label: str, path: Path, source: Path | None) -> dict[str, Any]:
+def display_name(value: str) -> str:
+    value = value.strip()
+    if not value or len(value) > 120 or any(unicodedata.category(char) == "Cc" for char in value):
+        raise ManagementError(
+            "invalid_name", "Use a project name of 1-120 characters without control characters"
+        )
+    return value
+
+
+def project_update(registry: Registry, project_id: str, new_name: str) -> dict[str, Any]:
+    label = display_name(new_name)
+    with registry.lock("registry"):
+        project = registry.get("project", project_id)
+        project["display_name"] = label
+        registry.put("project", project)
+        return project
+
+
+def project_pin(registry: Registry, project_id: str, *, pinned: bool) -> dict[str, Any]:
+    with registry.lock("registry"):
+        project = registry.get("project", project_id)
+        project["pinned"] = pinned
+        registry.put("project", project)
+        return project
+
+
+def project_delete(registry: Registry, project_id: str, *, yes: bool) -> dict[str, Any]:
+    with registry.lock("registry"):
+        project = registry.get("project", project_id)
+        count = sum(task["project"] == project_id for task in registry.all("taskenv"))
+        if count:
+            raise ManagementError(
+                "project_not_empty",
+                f"Project {project_id} still has {count} environment(s). "
+                "Unregister them before deleting the project.",
+            )
+        if yes:
+            registry.delete("project", project_id)
+        return {
+            "project": project_id,
+            "display_name": project.get("display_name") or project_id,
+            "source_checkout": project["source_checkout"],
+            "warning": (
+                "Deletes only the project registration. Repository, worktrees and files remain."
+            ),
+            "removed": yes,
+        }
+
+
+def project_add(
+    registry: Registry,
+    label: str,
+    path: Path,
+    source: Path | None,
+    *,
+    project_name: str | None = None,
+) -> dict[str, Any]:
     name(label)
+    title = display_name(project_name) if project_name is not None else None
     info = identity(path)
     root = Path(info["path"])
     source = source.resolve() if source is not None else None
@@ -64,7 +122,14 @@ def project_add(registry: Registry, label: str, path: Path, source: Path | None)
                     existing = project
                     break
                 raise ManagementError(
-                    "already_registered", "Project ID or repository is already registered"
+                    "already_registered",
+                    (
+                        "This repository is already registered as "
+                        f"{project.get('display_name') or project['id']} (ID: {project['id']})."
+                        if project["common"] == info["common"]
+                        else f"Project ID {label} is already in use. Choose a different project ID."
+                    ),
+                    details={"existing_project": project["id"]},
                 )
         configuration = supply(root, source)
         if existing is None:
@@ -76,10 +141,14 @@ def project_add(registry: Registry, label: str, path: Path, source: Path | None)
                 "source": str(root / CONFIG),
                 "created_at": now(),
             }
+            if title is not None:
+                project["display_name"] = title
             registry.put("project", project)
         else:
             project = existing
         result = {**project, "configuration": configuration}
+        if existing is not None:
+            result["already_registered"] = True
         if configuration["method"] == "initialized":
             result["next_step"] = (
                 f"Edit {root / CONFIG} to define repository commands and services "
@@ -196,16 +265,16 @@ def creation_location(registry: Registry, project_id: str, branch: str) -> tuple
 def create(
     registry: Registry, project_id: str, ref: str, branch: str, source: Path | None = None
 ) -> dict[str, Any]:
-    project = registry.get("project", project_id)
-    common = Path(project["common"])
-    if [common.stat().st_dev, common.stat().st_ino] != project["common_inode"]:
-        raise ManagementError("identity_changed", "Registered repository has been replaced")
     if branch.startswith("-"):
         raise ManagementError("invalid_branch", "Branch cannot start with a dash")
-    commit = git(common, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
     # Acquire before Git creates anything and retain through registration/recovery.
     project_lock = f"project-{hashlib.sha256(project_id.encode()).hexdigest()[:56]}"
     with registry.lock(project_lock), registry.lock("registry"):
+        project = registry.get("project", project_id)
+        common = Path(project["common"])
+        if [common.stat().st_dev, common.stat().st_ino] != project["common_inode"]:
+            raise ManagementError("identity_changed", "Registered repository has been replaced")
+        commit = git(common, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
         task_id, path = creation_location(registry, project_id, branch)
         path.parent.mkdir(parents=True, exist_ok=True)
         git(common, "worktree", "add", "-b", branch, str(path), commit)

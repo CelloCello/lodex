@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { act, type Action } from "@/api";
+import { act, ApiError, type Action } from "@/api";
 import {
   consoleQueryKey,
   overviewQueryOptions,
@@ -9,6 +9,9 @@ import {
 
 const ordinaryWrites = [
   "project.add",
+  "project.rename",
+  "project.pin",
+  "project.delete",
   "worktree.create",
   "worktree.attach",
   "worktree.remove",
@@ -37,7 +40,9 @@ function isOrdinaryWrite(action: Action): action is OrdinaryWrite {
       ? typeof action.value === "string"
       : action.value === undefined) &&
     ordinaryWrites.some((name) => name === action.action) &&
-    (!["worktree.remove", "worktree.forget"].includes(action.action) ||
+    (!["worktree.remove", "worktree.forget", "project.delete"].includes(
+      action.action,
+    ) ||
       action.yes === true)
   );
 }
@@ -49,6 +54,7 @@ function completedNotice(
 ) {
   const config = result.configuration as
     { method?: string; path?: string } | undefined;
+  if (result.already_registered) return "Project already registered.";
   return config
     ? `${label} completed. Configuration ${config.method}: ${config.path}. ${typeof result.next_step === "string" ? result.next_step : ""}`
     : action.action === "worktree.remove"
@@ -164,6 +170,8 @@ export function useConsoleState(target?: string) {
     loading,
     busy,
     error,
+    errorDetails:
+      currentError instanceof ApiError ? currentError.details : undefined,
     notice,
     observed,
     refresh,

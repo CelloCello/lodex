@@ -90,8 +90,10 @@ test("register, create and remove a worktree through the console", async ({
       .getByRole("button", { name: "Add project", exact: true })
       .click();
     const dialog = page.getByRole("dialog");
-    await dialog.getByLabel("ID").fill("ui-fixture");
     await dialog.getByLabel("Path").fill(repo);
+    await dialog.getByLabel("Name", { exact: true }).fill("ui-fixture");
+    await dialog.getByText("Options", { exact: true }).click();
+    await dialog.getByLabel("Project ID").fill("ui-fixture");
     await dialog.getByRole("button", { name: "Add", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole("status")).toContainText(

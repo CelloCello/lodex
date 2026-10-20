@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowUpRight, GitBranch, Search } from "lucide-react";
+import { ArrowUpRight, GitBranch, Search, Pencil } from "lucide-react";
 import { useConsole } from "@/lib/console";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ import {
   taskLabel,
 } from "@/components/shared";
 import { EnvironmentForm } from "@/components/environment-form";
+import { projectLabel } from "@/lib/projects";
 import {
   attentionReasons,
   compareEnvironments,
@@ -27,8 +28,12 @@ import {
   worktreeKind,
 } from "@/lib/environments";
 
-export function Environments() {
-  const { data, loading } = useConsole();
+export function Environments({
+  onEdit,
+}: {
+  onEdit: (project: string, trigger: HTMLButtonElement) => void;
+}) {
+  const { data, loading, busy } = useConsole();
   const [query, setQuery] = useSearchParams();
   const search = query.get("q") || "";
   const project = query.get("project") || "";
@@ -52,7 +57,7 @@ export function Environments() {
     .filter(
       (t) =>
         (!project || t.project === project) &&
-        `${t.project} ${t.branch || "detached"} ${t.path} ${t.id}`
+        `${t.project} ${projectLabel(data.projects, t.project)} ${t.branch || "detached"} ${t.path} ${t.id}`
           .toLowerCase()
           .includes(search.toLowerCase()) &&
         (!status ||
@@ -78,13 +83,25 @@ export function Environments() {
   }
   return (
     <>
-      <PageHeading title={project || "Environments"}>
-        {(!project || currentProject) && (
-          <EnvironmentForm kind="add" project={project || undefined} />
+      <PageHeading
+        title={project ? projectLabel(data.projects, project) : "Environments"}
+      >
+        {currentProject && (
+          <Button
+            variant="outline"
+            disabled={!!busy}
+            onClick={(event) => onEdit(currentProject.id, event.currentTarget)}
+          >
+            <Pencil />
+            Edit
+          </Button>
         )}
       </PageHeading>
       {currentProject && (
         <div className="project-summary">
+          <p className="muted small">
+            Project ID <code>{currentProject.id}</code>
+          </p>
           <code className="muted break-value" aria-label="Source worktree path">
             {currentProject.source_checkout}
           </code>
@@ -103,38 +120,44 @@ export function Environments() {
           </details>
         </div>
       )}
-      <div className="filters">
-        <div className="search-field">
-          <Search />
-          <Input
-            aria-label="Search environments"
-            placeholder="Search…"
-            value={search}
-            onChange={(e) => filter("q", e.target.value)}
-          />
+      <div className="environment-toolbar">
+        <div className="filters">
+          <div className="search-field">
+            <Search />
+            <Input
+              aria-label="Search environments"
+              placeholder="Search…"
+              value={search}
+              onChange={(e) => filter("q", e.target.value)}
+            />
+          </div>
+          <select
+            aria-label="Filter by project"
+            value={project}
+            onChange={(e) => filter("project", e.target.value)}
+          >
+            <option value="">All projects</option>
+            {data.projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {projectLabel(data.projects, p.id)}
+                {p.display_name && p.display_name !== p.id ? ` (${p.id})` : ""}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Filter by status"
+            value={status}
+            onChange={(e) => filter("status", e.target.value)}
+          >
+            <option value="">All statuses</option>
+            <option value="running">Services running</option>
+            <option value="present">Available</option>
+            <option value="attention">Needs attention</option>
+          </select>
         </div>
-        <select
-          aria-label="Filter by project"
-          value={project}
-          onChange={(e) => filter("project", e.target.value)}
-        >
-          <option value="">All projects</option>
-          {data.projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.id}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Filter by status"
-          value={status}
-          onChange={(e) => filter("status", e.target.value)}
-        >
-          <option value="">All statuses</option>
-          <option value="running">Services running</option>
-          <option value="present">Available</option>
-          <option value="attention">Needs attention</option>
-        </select>
+        {(!project || currentProject) && (
+          <EnvironmentForm kind="add" project={project || undefined} />
+        )}
       </div>
       {loading ? (
         <Loading />
@@ -197,7 +220,8 @@ export function Environments() {
                         </code>
                         <div className="mobile-environment-summary">
                           <span>
-                            {!project && `${task.project} · `}
+                            {!project &&
+                              `${projectLabel(data.projects, task.project)} · `}
                             {
                               task.services.filter((s) => s.state === "running")
                                 .length
@@ -217,7 +241,11 @@ export function Environments() {
                           )}
                         </div>
                       </TableCell>
-                      {!project && <TableCell>{task.project}</TableCell>}
+                      {!project && (
+                        <TableCell>
+                          {projectLabel(data.projects, task.project)}
+                        </TableCell>
+                      )}
                       <TableCell>
                         <State value={task.state} worktree />
                         {(task.main || !task.owned) && (
@@ -313,7 +341,9 @@ export function Projects() {
   const { data, loading } = useConsole();
   const [search, setSearch] = useState("");
   const projects = data.projects.filter((p) =>
-    `${p.id} ${p.source_checkout}`.toLowerCase().includes(search.toLowerCase()),
+    `${p.id} ${p.display_name || ""} ${p.source_checkout}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
   );
   return (
     <>
@@ -347,10 +377,13 @@ export function Projects() {
                   <Link
                     to={`/environments?project=${encodeURIComponent(p.id)}`}
                   >
-                    {p.id}
+                    {p.display_name || p.id}
                     <ArrowUpRight size={16} />
                   </Link>
                 </h2>
+                <p className="muted small">
+                  Project ID <code>{p.id}</code>
+                </p>
                 <code className="muted break-value">{p.source_checkout}</code>
                 <div className="project-source">
                   <span className="muted">Config source</span>

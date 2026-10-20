@@ -152,8 +152,19 @@ its snapshot from the existing overview query; it adds no writes or telemetry.
 Service bars use SVG attributes and bundled CSS, preserving the strict CSP.
 
 Project source details and the environment list share `/environments?project=ID`.
-`/projects/:id` redirects there; no separate information component or dropdown menu
-is needed. Project names are links, chevrons toggle the tree, and overflow results
+`/projects/:id` redirects there; no separate information component is needed.
+The Projects heading's plus opens registration; per-project menus offer Edit, Pin/Unpin
+and Delete with icons. The project heading's Edit uses the same dialog. Environment
+creation is in the table toolbar. Pinning is a shared optional `pinned` field,
+ordered first only in the sidebar. Project deletion uses the existing preview and
+confirmation flow and is rejected by Core while environment registrations remain.
+Names are shared through Core's optional `display_name`; missing names fall back to
+the stable ID. Sidebar and Overview labels add the ID when names repeat, using
+the shared collision rule in `src/lib/projects.ts`. `project.rename`, `project.pin`
+and confirmed `project.delete` are ordinary writes with the same refresh and
+error lifecycle as registration. Conflict responses carry `details.existing_project`
+for navigation, without parsing human-readable error messages.
+Project names are links, chevrons toggle the tree, and overflow results
 use Show all. Normal rows omit the redundant worktree type; unavailable directories
 keep a short status. Optional form configuration and secret usage/storage guidance
 use native disclosures. Follow the [shared terminology](../../docs/management.md#terminology):
