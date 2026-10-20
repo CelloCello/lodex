@@ -173,7 +173,7 @@ test("failed queries wait for polling or explicit refresh and errors can be dism
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect.poll(() => reads).toBe(3);
   await expect(
-    page.getByRole("heading", { name: "Connect your first environment" }),
+    page.getByRole("heading", { name: "Register your first project" }),
   ).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
@@ -205,10 +205,7 @@ test("switching targets cancels an old detail request and keeps the new target i
   const canceled = page.waitForEvent("requestfailed", (request) =>
     request.url().endsWith("/api/task/target-a"),
   );
-  await page
-    .getByRole("navigation")
-    .getByRole("link", { name: /^Environments/ })
-    .click();
+  await page.getByRole("link", { name: "Environments", exact: true }).click();
   await canceled;
   await page.getByRole("link", { name: "target-b", exact: true }).click();
   await expect(
@@ -301,19 +298,13 @@ test("detail query errors follow the selected target and clear after recovery", 
   });
   await page.goto("/#/environments/error-target/services");
   await expect(page.getByRole("alert")).toContainText("Detail unavailable");
-  await page
-    .getByRole("navigation")
-    .getByRole("link", { name: /^Environments/ })
-    .click();
+  await page.getByRole("link", { name: "Environments", exact: true }).click();
   await page.getByRole("link", { name: "healthy-target", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "healthy-target", exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await page
-    .getByRole("navigation")
-    .getByRole("link", { name: /^Environments/ })
-    .click();
+  await page.getByRole("link", { name: "Environments", exact: true }).click();
   failing = false;
   await page.getByRole("link", { name: "error-target", exact: true }).click();
   await expect(
@@ -549,10 +540,7 @@ test("a mutation finishing after navigation refreshes the selected environment",
   await page.goto("/#/environments/write-origin/services");
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect.poll(() => !!pendingWrite).toBe(true);
-  await page
-    .getByRole("navigation")
-    .getByRole("link", { name: /^Environments/ })
-    .click();
+  await page.getByRole("link", { name: "Environments", exact: true }).click();
   await page
     .getByRole("link", { name: "write-destination", exact: true })
     .click();

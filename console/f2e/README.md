@@ -62,7 +62,7 @@ to that port when launching it manually.
 | Check | Steps and expected result |
 | --- | --- |
 | Appearance | Try Light, Dark and System across lists, details and a New worktree dialog. An explicit theme survives reload; System follows OS appearance changes. Text, placeholders and focus indicators remain readable. |
-| Navigation | Search and filter Environments, open a detail tab, then reload or go back. The URL preserves the tab and filters. Projects and Secrets remain reachable. |
+| Navigation | Start at Overview, open checkouts directly from the persistent project tree, search for an entry outside its six-item preview, and use the complete list's filters and pagination. Detail tabs, filters and page survive reload/back. Secrets and project configuration remain reachable. |
 | Services and commands | Open the fixture HTTP URL, read logs, Stop and Start its service; run prepare and verify in Operations. State and execution output update. Reload after completion does not run a command again. |
 | Secrets | Save a dummy value, confirm the input clears and the value is not shown in the list, then delete it. |
 | Create and remove | Create `feature/manual-ui-check`; it should not start services automatically. Inspect the removal scope, cancel once, then remove that new worktree. Force starts unchecked. Removal retains its evidence record; Forget is a separate action. |
@@ -80,7 +80,9 @@ to Lodex. The admin example application and its authentication, charts and store
 are not bundled.
 
 - `src/app.tsx`: application shell, responsive navigation and routes.
-- `src/pages/`: environment list/detail, projects and shared secrets.
+- `src/pages/`: Overview dashboard, environment list/detail, projects and shared secrets.
+- `src/components/project-navigation.tsx`: persistent project tree, full-registry search and shared desktop/mobile expansion state.
+- `src/lib/environments.ts`: shared attention, service grouping, environment ordering and latest-operation semantics.
 - `src/components/ui/`: shadcn primitives generated with `components.json`.
 - `src/components/`: environment forms, scope confirmations and shared displays.
 - `src/lib/console.tsx`: TanStack Query overview/detail reads and explicit action
@@ -140,6 +142,14 @@ mount. The initial token fragment is consumed before the router mounts; subseque
 routes contain no credentials. List filters live in search parameters inside the
 hash. Detail tabs use manual keyboard activation (arrow keys to focus, Enter/Space
 to select), so focus does not create extra history entries.
+
+Overview (`/dashboard`) is the entry route. `/environments` retains the complete
+list and existing deep links; project selection, filters and eight-row pagination
+are URL state. The tree remains mounted while the right-hand page changes, and
+desktop/mobile menus share search and expanded projects. Plus buttons open the
+existing form workflow through a create/connect choice. The dashboard derives
+its snapshot from the existing overview query; it adds no writes or telemetry.
+Service bars use SVG attributes and bundled CSS, preserving the strict CSP.
 
 The shadcn dialog keeps Radix focus trapping and portals, with a static overlay
 and CSS scroll lock instead of Radix's injected scroll-lock stylesheet. This

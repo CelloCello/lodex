@@ -52,6 +52,7 @@ test("legacy external records show guidance without process controls", async ({
     }),
   );
   await page.goto("/#token=browser-fixture-token");
+  await page.goto("/#/environments");
   await page.getByRole("link", { name: "legacy", exact: true }).click();
   const legacy = page.locator(".service-row").filter({ hasText: "old-api" });
   await expect(legacy).toContainText("read-only");
@@ -83,10 +84,8 @@ test("register, create and remove a worktree through the console", async ({
     execFileSync("git", ["add", "README.md"], { cwd: repo });
     execFileSync("git", ["commit", "-qm", "fixture"], { cwd: repo });
     await page.goto("/#token=browser-fixture-token");
-    await page
-      .getByRole("navigation")
-      .getByRole("link", { name: /^Projects/ })
-      .click();
+    await page.goto("/#/environments");
+    await page.goto("/#/projects");
     await page
       .getByRole("button", { name: "Register project", exact: true })
       .click();
@@ -105,10 +104,12 @@ test("register, create and remove a worktree through the console", async ({
       has: page.getByRole("heading", { name: "ui-fixture", exact: true }),
     });
     await expect(project).toContainText(repo);
-    await project.getByRole("button", { name: "Attach checkout" }).click();
+    await project
+      .getByRole("button", { name: "Connect existing checkout" })
+      .click();
     await dialog.getByLabel("Absolute checkout path").fill(repo);
     await dialog
-      .getByRole("button", { name: "Attach checkout", exact: true })
+      .getByRole("button", { name: "Connect existing checkout", exact: true })
       .click();
     await expect(page.locator(".detail-meta")).toContainText("Main checkout");
     await page
@@ -126,10 +127,7 @@ test("register, create and remove a worktree through the console", async ({
     await expect(
       page.getByRole("heading", { name: "Environments", exact: true }),
     ).toBeVisible();
-    await page
-      .getByRole("navigation")
-      .getByRole("link", { name: /^Projects/ })
-      .click();
+    await page.goto("/#/projects");
     await project.getByRole("button", { name: "New worktree" }).click();
     await dialog.getByLabel("New branch").fill("feature/from-console");
     await dialog
@@ -208,6 +206,7 @@ test("CLI-created environment can be managed from browser without replaying writ
       errors.push(message.text());
   });
   await page.goto("/#token=browser-fixture-token");
+  await page.goto("/#/environments");
   await page
     .getByRole("link", { name: "feature/console", exact: true })
     .click();
@@ -279,7 +278,7 @@ test("CLI-created environment can be managed from browser without replaying writ
     .fill("synthetic-browser-only");
   await page.getByRole("button", { name: "Save secret" }).click();
   await expect(
-    page.getByRole("cell", { name: "browser-secret", exact: true }),
+    page.getByRole("strong").filter({ hasText: /^browser-secret$/ }),
   ).toBeVisible();
   await expect(page.getByLabel("Value", { exact: true })).toBeEmpty();
   expect(await page.locator("body").textContent()).not.toContain(
@@ -294,12 +293,9 @@ test("CLI-created environment can be managed from browser without replaying writ
     page.getByRole("button", { name: "Remove browser-secret", exact: true }),
   ).toBeFocused();
   await expect(
-    page.getByRole("cell", { name: "browser-secret", exact: true }),
+    page.getByRole("strong").filter({ hasText: /^browser-secret$/ }),
   ).toBeVisible();
-  await page
-    .getByRole("navigation")
-    .getByRole("link", { name: /^Environments/ })
-    .click();
+  await page.goto("/#/environments");
   await page
     .getByRole("link", { name: "feature/console", exact: true })
     .click();

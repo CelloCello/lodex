@@ -117,6 +117,7 @@ test("filters, deep links, browser history and mobile navigation preserve contex
   });
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.goto("/#token=browser-fixture-token");
+  await page.goto("/#/environments");
   await expect(
     page.getByRole("link", { name: "feature/project-console", exact: true }),
   ).toBeVisible();
@@ -163,10 +164,7 @@ test("filters, deep links, browser history and mobile navigation preserve contex
   await page.goBack();
   await expect(page.getByLabel("Filter by project")).toHaveValue("sample-app");
   await expect(page.getByLabel("Filter by status")).toHaveValue("running");
-  await page
-    .getByRole("navigation")
-    .getByRole("link", { name: /^Projects/ })
-    .click();
+  await page.goto("/#/projects");
   await expect(
     page.getByText(projects[0].source_checkout, { exact: true }),
   ).toBeVisible();
@@ -193,9 +191,10 @@ test("filters, deep links, browser history and mobile navigation preserve contex
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page
     .getByRole("dialog")
-    .getByRole("link", { name: /^Environments/ })
+    .getByRole("link", { name: "Overview", exact: true })
     .click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.goto("/#/environments");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -234,8 +233,9 @@ test("an empty registry directs users to project registration without disabling 
     }),
   );
   await page.goto("/#token=browser-fixture-token");
+  await page.goto("/#/environments");
   await expect(
-    page.getByRole("button", { name: "New worktree" }),
+    page.getByRole("button", { name: "Add checkout", exact: true }),
   ).toBeDisabled();
   await page.getByRole("link", { name: "Register a project" }).click();
   await page.getByRole("button", { name: "Register project" }).click();
@@ -269,11 +269,12 @@ test("theme follows the system, persists explicit choices and keeps both palette
   await page.emulateMedia({ colorScheme: "dark" });
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.goto("/#token=browser-fixture-token");
+  await page.goto("/#/environments");
   const theme = page.getByRole("combobox", { name: "Color theme" });
   await expect(theme).toHaveValue("system");
   await expect(page.locator("html")).toHaveClass("dark");
   await expect(
-    page.getByText("feature/project-console", { exact: true }),
+    page.getByRole("link", { name: "feature/project-console", exact: true }),
   ).toBeVisible();
   await page.emulateMedia({ colorScheme: "light" });
   await expect(page.locator("html")).not.toHaveClass("dark");
@@ -345,7 +346,10 @@ test("theme follows the system, persists explicit choices and keeps both palette
   await page.reload();
   await expect(theme).toHaveValue("dark");
   await expect(page.locator("html")).toHaveClass("dark");
-  await page.getByRole("button", { name: "New worktree" }).click();
+  await page.getByRole("button", { name: "Add checkout", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Create a new worktree", exact: false })
+    .click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.screenshot({
     path: "test-results/form-dark-desktop.png",
@@ -425,6 +429,7 @@ test("theme selection remains usable when browser storage is blocked", async ({
     }),
   );
   await page.goto("/#token=browser-fixture-token");
+  await page.goto("/#/environments");
   await page
     .getByRole("combobox", { name: "Color theme" })
     .selectOption("dark");

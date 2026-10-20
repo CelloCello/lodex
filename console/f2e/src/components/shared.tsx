@@ -13,9 +13,12 @@ import {
 import type { Task } from "@/api";
 
 export function taskLabel(task: Task) {
-  return (
-    task.branch || (task.state === "present" ? "Detached checkout" : task.id)
-  );
+  if (task.branch) return task.branch;
+  if (task.state === "present") return "Detached checkout";
+  const directory = task.path.replace(/\/+$/, "").split("/").pop();
+  return directory && !/^[a-f0-9]{16}$/i.test(directory)
+    ? directory
+    : "Unavailable checkout";
 }
 export function State({
   value,

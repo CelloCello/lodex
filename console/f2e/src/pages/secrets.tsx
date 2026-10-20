@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { KeyRound, Plus, Trash2 } from "lucide-react";
 import { useConsole } from "@/lib/console";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,8 @@ import {
 export function Secrets() {
   const { data, loading, busy, perform } = useConsole();
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [storedName, setStoredName] = useState("");
+  const valueInput = useRef<HTMLInputElement>(null);
   return (
     <>
       <PageHeading
@@ -33,7 +35,8 @@ export function Secrets() {
             Add or update a secret
           </h2>
           <p className="muted">
-            Saving an existing name replaces its value for all references.
+            Stored values cannot be read back. Enter a new value to replace an
+            existing name for all references.
           </p>
         </div>
         <form
@@ -45,6 +48,7 @@ export function Secrets() {
             const name = String(fields.get("name"));
             const value = String(fields.get("value"));
             form.reset();
+            setStoredName("");
             void perform({ action: "secret.set", name, value }, "Save secret");
           }}
         >
@@ -52,6 +56,8 @@ export function Secrets() {
             Stored name
             <Input
               name="name"
+              value={storedName}
+              onChange={(event) => setStoredName(event.target.value)}
               required
               placeholder="app-dev-token"
               autoComplete="off"
@@ -61,6 +67,7 @@ export function Secrets() {
             Value
             <Input
               name="value"
+              ref={valueInput}
               type="password"
               required
               autoComplete="new-password"
@@ -89,7 +96,7 @@ export function Secrets() {
             <TableHeader>
               <TableRow>
                 <TableHead>Stored name</TableHead>
-                <TableHead>Configuration reference</TableHead>
+                <TableHead>How to reference</TableHead>
                 <TableHead>
                   <span className="sr-only">Actions</span>
                 </TableHead>
@@ -98,11 +105,38 @@ export function Secrets() {
             <TableBody>
               {data.secrets.map((name) => (
                 <TableRow key={name}>
-                  <TableCell className="font-medium">{name}</TableCell>
+                  <TableCell>
+                    <strong>{name}</strong>
+                    <div className="cell-secondary">
+                      Stored · value is not returned
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <code>secret:{name}</code>
+                    <details className="secret-reference">
+                      <summary>Use in project.toml</summary>
+                      <pre>{`[secrets]\nAPI_TOKEN = ${JSON.stringify(`secret:${name}`)}`}</pre>
+                      <p className="muted small">
+                        API_TOKEN is the environment variable your application
+                        receives. {name} is the stored name. This example is not
+                        a list of projects using the secret.
+                      </p>
+                    </details>
                   </TableCell>
                   <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      disabled={!!busy}
+                      onClick={() => {
+                        setStoredName(name);
+                        if (valueInput.current) {
+                          valueInput.current.value = "";
+                          valueInput.current.focus();
+                        }
+                      }}
+                    >
+                      Replace value<span className="sr-only"> for {name}</span>
+                    </Button>
                     <Button
                       variant="ghost"
                       className="text-destructive"

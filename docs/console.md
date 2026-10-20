@@ -49,10 +49,29 @@ below for in-progress commands.
 
 ## Navigate and operate
 
-Environments is the default page. Search by branch, project, path or ID, and filter
-by project or status. Projects provides repository registration, configuration
-sources, worktree creation and attaching existing checkouts. Registration does
-not implicitly create, prepare or start an environment.
+Overview is the default page. It shows current service counts by project,
+environments needing attention, and checkout availability. Service states and
+command outcomes remain separate: a running environment can also need attention.
+Attention includes unavailable checkouts, invalid configuration, failed/unknown
+services, and a latest command with a failed, interrupted or unknown outcome.
+Charts count recorded services, including stopped, transitional, unknown and legacy
+external records; they do not infer unrecorded services or historical trends.
+
+The sidebar keeps Overview, the project/checkout tree and shared Secrets available
+on every page. Open a checkout directly from its project. Each expanded project
+previews up to six entries, prioritizing the main checkout, selected checkout,
+attention, and running services. Search covers all registered paths, branches,
+project names and IDs, including entries outside that preview. View all checkouts
+opens the complete searchable/filterable list, with eight entries per page and
+pagination preserved in the URL. Unreadable branches fall back to a readable
+directory name or an unavailable-checkout label; the stable ID remains in details.
+
+Each project row's plus button offers a new worktree or connecting an existing
+checkout. Connecting registers an existing main checkout or worktree from the same
+local repository in place. Project configuration remains available from Overview
+and the project-filtered checkout page, with registration, configuration sources,
+worktree creation and existing-checkout controls. Registration does not implicitly
+create, prepare or start an environment.
 
 Open an environment for Services, Operations, Configuration, Resources, and
 Cleanup & removal. Services keeps process state, URLs, start/stop and logs together;
@@ -85,6 +104,9 @@ The Secrets page operates independently of projects. Values are sent in request
 bodies, cleared from the form after submission and never returned. The local
 management SQLite database stores values in plaintext under private permissions;
 updating a shared name affects the next command/start/export, not running processes.
+Replace value selects the stored name and focuses an empty input, without reading
+its stored value. Each reference can expand to a TOML example distinguishing the
+application's environment variable name from the shared storage name.
 
 Closing a tab does not stop services or replay a submitted action. Reopening it
 queries recorded results. Commands execute in a separate foreground worker so

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Link,
-  NavLink,
   Navigate,
   Route,
   Routes,
@@ -9,11 +8,8 @@ import {
   useLocation,
 } from "react-router-dom";
 import {
-  Boxes,
   Check,
   ChevronRight,
-  FolderGit2,
-  KeyRound,
   LoaderCircle,
   Menu,
   Monitor,
@@ -32,6 +28,12 @@ import {
 import { Environments, Projects } from "@/pages/environments";
 import { EnvironmentDetail } from "@/pages/environment-detail";
 import { Secrets } from "@/pages/secrets";
+import { Dashboard } from "@/pages/dashboard";
+import {
+  ProjectNavigation,
+  useProjectNavigation,
+} from "@/components/project-navigation";
+import { EnvironmentForm } from "@/components/environment-form";
 import { taskLabel } from "@/components/shared";
 import { useTheme, type Theme } from "@/lib/theme";
 
@@ -41,12 +43,21 @@ export function App() {
   const target = matchPath("/environments/:id/*", location.pathname)?.params.id;
   const state = useConsoleState(target);
   const [menu, setMenu] = useState(false);
+  const [form, setForm] = useState<{
+    kind: "add" | "project";
+    project?: string;
+  } | null>(null);
+  const projectNavigation = useProjectNavigation(state.data, target);
   const main = useRef<HTMLElement>(null);
+  const mobileMenu = useRef<HTMLButtonElement>(null);
+  const formTrigger = useRef<HTMLElement | null>(null);
   const section = location.pathname.startsWith("/projects")
     ? "Projects"
     : location.pathname.startsWith("/secrets")
       ? "Secrets"
-      : "Environments";
+      : location.pathname.startsWith("/environments")
+        ? "Environments"
+        : "Overview";
   useEffect(() => {
     setMenu(false);
   }, [location.pathname]);
@@ -55,22 +66,32 @@ export function App() {
   }, [section, target]);
   useEffect(() => {
     document.title = `${target && state.detail?.id === target ? taskLabel(state.detail) : section} · Lodex`;
-  }, [section, target, state.detail?.branch, state.detail?.id]);
+  }, [
+    section,
+    target,
+    state.detail?.branch,
+    state.detail?.id,
+    state.detail?.path,
+    state.detail?.state,
+  ]);
   const navigation = (
-    <nav aria-label="Main navigation">
-      <NavLink to="/environments">
-        <Boxes />
-        Environments<span>{state.data.taskenvs.length}</span>
-      </NavLink>
-      <NavLink to="/projects">
-        <FolderGit2 />
-        Projects<span>{state.data.projects.length}</span>
-      </NavLink>
-      <NavLink to="/secrets">
-        <KeyRound />
-        Secrets<span>{state.data.secrets.length}</span>
-      </NavLink>
-    </nav>
+    <ProjectNavigation
+      data={state.data}
+      target={target}
+      navigation={projectNavigation}
+      busy={!!state.busy}
+      onNavigate={() => setMenu(false)}
+      onAdd={(project, trigger) => {
+        formTrigger.current = menu ? mobileMenu.current : trigger;
+        setMenu(false);
+        setForm({ kind: "add", project });
+      }}
+      onRegister={(trigger) => {
+        formTrigger.current = menu ? mobileMenu.current : trigger;
+        setMenu(false);
+        setForm({ kind: "project" });
+      }}
+    />
   );
   return (
     <ConsoleContext.Provider value={state}>
@@ -86,7 +107,7 @@ export function App() {
       </a>
       <div className="app-shell">
         <aside className="sidebar">
-          <Link className="brand" to="/environments">
+          <Link className="brand" to="/dashboard">
             <img
               className="brand-mark"
               src="/lodex-logo.svg"
@@ -97,22 +118,12 @@ export function App() {
             lodex<span className="brand-caption">Console</span>
           </Link>
           {navigation}
-          <div className="sidebar-footer">
-            <div>
-              <Monitor size={15} />
-              <span>For coding agents</span>
-            </div>
-            <p>
-              Shared with your CLI and agent.
-              <br />
-              Services stay running when you leave.
-            </p>
-          </div>
         </aside>
         <div className="main-shell">
           <header className="topbar">
             <div className="breadcrumbs">
               <Button
+                ref={mobileMenu}
                 className="mobile-menu"
                 variant="ghost"
                 size="icon"
@@ -123,7 +134,26 @@ export function App() {
               </Button>
               <Monitor size={15} className="muted desktop-icon" />
               <ChevronRight size={13} className="muted desktop-icon" />
-              <Link to={`/${section.toLowerCase()}`}>{section}</Link>
+              <Link
+                to={
+                  section === "Overview"
+                    ? "/dashboard"
+                    : `/${section.toLowerCase()}`
+                }
+              >
+                {section}
+              </Link>
+              {target && state.detail && (
+                <>
+                  <ChevronRight size={13} className="muted" />
+                  <Link
+                    className="breadcrumb-project"
+                    to={`/environments?project=${encodeURIComponent(state.detail.project)}`}
+                  >
+                    {state.detail.project}
+                  </Link>
+                </>
+              )}
               {target && (
                 <>
                   <ChevronRight size={13} className="muted" />
@@ -203,6 +233,7 @@ export function App() {
               </div>
             )}
             <Routes>
+              <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/environments" element={<Environments />} />
               <Route
                 path="/environments/:id/:tab?"
@@ -210,15 +241,25 @@ export function App() {
               />
               <Route path="/projects" element={<Projects />} />
               <Route path="/secrets" element={<Secrets />} />
-              <Route
-                path="*"
-                element={<Navigate replace to="/environments" />}
-              />
+              <Route path="*" element={<Navigate replace to="/dashboard" />} />
             </Routes>
           </main>
         </div>
         <Dialog open={menu} onOpenChange={setMenu}>
-          <DialogContent className="mobile-navigation">
+          <DialogContent
+            className="mobile-navigation"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              const anotherDialog = document.querySelector(
+                '[role="dialog"][data-state="open"]',
+              );
+              if (
+                !anotherDialog &&
+                !main.current?.contains(document.activeElement)
+              )
+                mobileMenu.current?.focus();
+            }}
+          >
             <DialogHeader>
               <DialogTitle className="brand">
                 <img
@@ -237,6 +278,22 @@ export function App() {
             {navigation}
           </DialogContent>
         </Dialog>
+        {form && (
+          <EnvironmentForm
+            key={`${form.kind}:${form.project || ""}`}
+            kind={form.kind}
+            project={form.project}
+            open
+            onOpenChange={(open) => {
+              if (!open) setForm(null);
+            }}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              if (formTrigger.current?.isConnected) formTrigger.current.focus();
+              else main.current?.focus();
+            }}
+          />
+        )}
       </div>
     </ConsoleContext.Provider>
   );
