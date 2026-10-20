@@ -5,7 +5,8 @@
 第一次使用請先走完 [已安裝版本的網站操作教學](manual-validation.md)。
 本篇是較完整的開發驗證流程，需要 Lodex 原始碼工作區。
 
-這份流程讓你實際操作新功能，重點是「是否容易理解、結果是否符合預期」。
+這份流程驗證你與 coding agent 共用的環境工具：建立 checkout、執行命令、管理服務與清理資源。
+透過 CLI 與 Console 操作，檢查同一環境的狀態與結果是否一致；agent 搭配 skills 的用法見前述教學。
 建議預留 30–45 分鐘，依序完成；只想快速看介面，可先用
 [現有瀏覽器 fixture](../console/f2e/README.md#manual-verification)。
 

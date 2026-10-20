@@ -8,3 +8,7 @@ dist/
 node_modules/
 test-results/
 playwright-report/
+.codex/hooks.json
+.impeccable/mocks/
+.impeccable/review/
+.impeccable/config.local.json

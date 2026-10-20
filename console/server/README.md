@@ -1,5 +1,10 @@
 # Console server
 
+The HTTP and asset server for Lodex's optional Console. It connects the browser
+to the same local task environments used by developers and coding agents through
+the CLI. See the [main README](../../README.md) for the overall workflow and
+the [Console guide](../../docs/console.md) for usage.
+
 The `lodex-console` distribution provides `lodex_console`, depending on
 `lodex-core`, FastAPI and Uvicorn. It does not depend on the CLI.
 

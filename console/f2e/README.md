@@ -1,7 +1,15 @@
 # Console frontend
 
+The browser UI for Lodex's optional Console: inspect task checkouts, run configured
+commands, and view or control services while working with a coding agent. It uses
+the same management state as the CLI through the Console server.
+See the [main README](../../README.md) for the overall workflow and
+the [Console guide](../../docs/console.md) for installed usage.
+
 React/TypeScript source lives in `src/`. Vite builds into the server package's
 `src/lodex_console/static/`; these generated assets are shipped with the server.
+Vite's public assets come from `docs/assets/` at the repository root, so the
+Console brand and favicon share the README's `lodex-logo.svg` source.
 
 Building requires Node.js 20.19+ or 22.12+ (Vite 8's supported ranges) and the
 pnpm version pinned in `package.json`. Type checking uses TypeScript 7's native

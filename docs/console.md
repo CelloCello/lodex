@@ -1,7 +1,10 @@
 # Local console
 
-The console uses the same management database and Python core as the CLI. It is
-optional; environment management and history do not require it.
+The Console is Lodex's optional browser interface for the task environments you
+use with a coding agent. Inspect checkouts, command results and service logs after
+your agent uses the CLI, or operate those same environments yourself. The Console
+shares the CLI's management database and Python core; history retrieval uses the
+CLI or MCP. Both workflows are available without the Console.
 
 For a guided first run after installation, follow the
 [first website walkthrough](manual-validation.md): clone a small MDN site,

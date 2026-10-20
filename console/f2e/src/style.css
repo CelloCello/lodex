@@ -236,11 +236,8 @@
   letter-spacing: -0.025em;
 }
 .brand-mark {
-  background: var(--primary);
-  color: var(--primary-foreground);
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
+  display: block;
+  flex-shrink: 0;
   width: 32px;
   height: 32px;
 }

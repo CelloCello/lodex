@@ -42,7 +42,7 @@ modify shell startup files, or guess a checkout path that has not been verified.
 ### CLI workflow
 
 1. Run `lodex status --json`. Use normal hybrid search when the Ollama runtime and database are compatible.
-   - If the command is blocked with `Operation not permitted`, `unable to open database file`, or an equivalent sandbox permission error, request approval to retry that exact read-only Lodex command outside the sandbox. Explain that it only reads `~/.local/share/lodex` and connects to loopback Ollama.
+   - If the command is blocked with `Operation not permitted`, `unable to open database file`, or an equivalent sandbox permission error, request approval to retry that exact read-only Lodex command outside the sandbox. Explain that it only reads the resolved history index (default `$LODEX_HOME/history/lodex.db`, with `LODEX_HOME` defaulting to `~/.lodex`) and connects to loopback Ollama.
    - Apply this retry only to `status`, `search`, or `show`, at most once per command.
    - Some surfaces, including side conversations, cannot request approval. If and only if the database reports compatible but loopback Ollama is blocked by the sandbox, continue with the explicit `--lexical` search mode. State in the final answer that semantic retrieval was unavailable and lexical recall may be lower.
    - Do not use lexical mode for a database compatibility error, an embedding model/dimension mismatch, or an unhealthy Ollama runtime unrelated to sandbox access. Report that actionable error and stop. If approval is available but denied, stop rather than bypassing the decision.

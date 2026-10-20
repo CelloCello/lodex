@@ -10,6 +10,7 @@ extends = ":workspace"
 enabled = false
 
 # Deliberately no Lodex state grant, Herdr socket grant, or Git write override.
+# Omitting grants here does not revoke inherited grants; review them explicitly.
 # Add explicit per-server/per-plugin disables after inspecting local config.
 # Example for an existing MCP server named computer-use:
 # [mcp_servers.computer-use]

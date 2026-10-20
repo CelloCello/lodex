@@ -17,6 +17,8 @@ from lodex_core.history import queries
 from lodex_core.history.config import load_config
 
 INSTRUCTIONS = (
+    "Lodex provides local tools for working with coding agents. "
+    "This read-only MCP interface retrieves context from prior agent sessions. "
     "Search local coding-agent history with status, search, and show. "
     "Check status first. For project searches pass the user's absolute project path, "
     "never 'current' or the server's working directory. Use project=null only for "

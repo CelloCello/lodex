@@ -1,6 +1,11 @@
 # Repository architecture
 
-Lodex is a monorepo with a shared Python workspace and a React frontend. Each
+Lodex provides local tools for developers working with coding agents. Its CLI
+exposes task environment management and session history retrieval; bundled skills
+guide agent use, MCP exposes read-only history queries, and the optional Console
+provides a browser interface to environment management.
+
+The monorepo contains a shared Python workspace and a React frontend. Each
 Python project uses `src` layout, declares its own runtime dependencies, and
 builds its own wheel and source distribution. The root coordinates development;
 it is not an installable package.
@@ -64,8 +69,11 @@ also owns the Skills and their installation lifecycle.
 The Console's request worker is an HTTP implementation detail. Long-running
 service supervision belongs to Core and survives CLI or Console shutdown.
 Neither the monorepo nor its workspace introduces a required central daemon.
-User data stays outside the repository at the documented management/history
-locations; import/package changes do not change database schemas or taskenv IDs.
+User data defaults to `LODEX_HOME` (`~/.lodex`) outside the repository. Management
+uses `management.db` and its resource directories; history defaults to
+`history/config.toml` and `history/lodex.db`, with explicit history path overrides
+available. The two workflows keep separate databases and configuration contracts.
+Import/package changes do not change database schemas or taskenv IDs.
 
 ## Development and tests
 
@@ -115,6 +123,10 @@ with `uv run pytest`, or select a subproject's tests explicitly. Running
 `uv run pytest tests` from a Python subproject also selects only its local tests.
 
 ## Build and installation
+
+The repository uses Apache License 2.0. Each Python package keeps a byte-identical
+copy of the root `LICENSE` so its wheel and standalone sdist include the license
+text. Keep those copies and the package license metadata synchronized.
 
 All three Python distributions use the same release version and exact internal
 dependency versions. Update the three project versions, internal requirements,

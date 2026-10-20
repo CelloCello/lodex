@@ -2,8 +2,15 @@
 
 [Back to README](../README.md)
 
+Lodex's environment tools give you and your coding agent a shared way to prepare
+task checkouts, run repository commands and manage services. Use the CLI directly
+or let an agent call it through the bundled project-setup, worktree and services
+skills. Environment state and logs remain available when you change callers or
+start another agent session.
+
 Management is CLI-first and works without Codex or Ollama. History commands
-retain their own configuration and database. `LODEX_HOME` defaults to `~/.lodex`;
+retain their own configuration and database under `$LODEX_HOME/history` by default.
+`LODEX_HOME` defaults to `~/.lodex`;
 management.db, operation logs and service handles live there, outside worktrees.
 New worktrees live under `LODEX_HOME/projects/PROJECT/BRANCH-SLUG--SHORT-ID`.
 For example, branch `demo/change-title` can produce `demo-change-title--a3f19c82`.

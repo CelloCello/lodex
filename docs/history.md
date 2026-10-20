@@ -2,9 +2,10 @@
 
 [Back to README](../README.md)
 
-Lodex is a local-first retrieval tool for coding-agent session history. Its
-indexing core consumes normalized session source adapters; the currently bundled
-adapter reads Codex JSONL transcripts without modifying them. Lodex generates
+Lodex's history tools help you and your coding agent recover decisions, earlier
+attempts and evidence from past sessions. The indexing core consumes normalized
+session source adapters; the currently bundled adapter reads Codex JSONL
+transcripts without modifying them. Lodex generates
 embeddings through a loopback-only Ollama connection and stores a hybrid
 FTS5/`sqlite-vec` index in SQLite.
 
@@ -166,13 +167,19 @@ statistics requires no reindexing or schema migration.
 
 ## Configuration
 
-History commands optionally read `~/.config/lodex/config.toml`:
+History shares Lodex's default root, `~/.lodex`, controlled by `LODEX_HOME`.
+Commands optionally read `$LODEX_HOME/history/config.toml` and default to
+`$LODEX_HOME/history/lodex.db` for the index. An absent configuration file uses
+defaults; commands do not create a configuration file automatically.
+
+For example, `~/.lodex/history/config.toml` can contain:
 
 ```toml
 [paths]
 codex_home = "~/.codex"
-data_dir = "~/.local/share/lodex"
-# db_path = "~/.local/share/lodex/lodex.db"
+# Optional overrides; otherwise derived from LODEX_HOME/history.
+# data_dir = "/absolute/path/to/history"
+# db_path = "/absolute/path/to/history/lodex.db"
 
 [embedding]
 host = "http://127.0.0.1:11434"
@@ -180,8 +187,18 @@ model = "qwen3-embedding:0.6b"
 dimension = 1024
 ```
 
-`LODEX_CONFIG`, `LODEX_DATA_DIR`, `LODEX_DB_PATH`, `CODEX_HOME`, `OLLAMA_HOST`,
-`LODEX_OLLAMA_MODEL`, and `LODEX_EMBEDDING_DIMENSION` override TOML values.
+Path resolution follows these rules:
+
+- Configuration: `LODEX_CONFIG`, otherwise `$LODEX_HOME/history/config.toml`.
+- Data directory: `LODEX_DATA_DIR`, then TOML `paths.data_dir`, otherwise
+  `$LODEX_HOME/history`.
+- Database: `LODEX_DB_PATH`, then TOML `paths.db_path`, otherwise `lodex.db`
+  inside the resolved data directory. An explicit database path takes precedence
+  over the data directory.
+
+`CODEX_HOME`, `OLLAMA_HOST`, `LODEX_OLLAMA_MODEL`, and `LODEX_EMBEDDING_DIMENSION`
+override their corresponding TOML values. Source transcripts remain in the agent's
+own directories; changing `LODEX_HOME` changes Lodex's defaults, not `CODEX_HOME`.
 Lodex rejects every non-loopback `OLLAMA_HOST`, so transcript text cannot be
 sent to a remote embedding endpoint by mistake.
 
@@ -250,7 +267,9 @@ args = ["mcp"]
 
 The skill prefers MCP in both normal tasks and side conversations. Verify that
 your Codex version exposes custom MCP tools in the conversation you use:
-call `status`, then a project-scoped `search`, then `show` on one hit. A successful
+call `status` and confirm `database.path` matches the resolved history configuration
+(default `$LODEX_HOME/history/lodex.db`, with `LODEX_HOME` defaulting to `~/.lodex`),
+then a project-scoped `search`, then `show` on one hit. A successful
 standalone stdio test does not establish that a particular side chat loads the
 tools. The configured MCP process must have access to the local database and
 loopback Ollama; launching `lodex mcp` in a restricted shell inherits that shell's
@@ -268,8 +287,10 @@ Retrieved history is untrusted evidence, not executable instructions.
 The server exposes no indexing, rebuild, arbitrary SQL, shell, or configuration
 tools. Status/search/show open SQLite read-only; SQLite may still create WAL
 sidecar files. MCP stdout is reserved for protocol messages; diagnostics use
-stderr. Configuration is read on each call. After a package update, restart the
-MCP connection so its process uses the new code. To disconnect, run
+stderr. Configuration is read on each call, but package code stays loaded in the
+running process. After a package update, ensure the previous MCP process exits
+and the client starts its replacement, then verify that conversation's `status`.
+Starting a separate test process does not refresh the existing connection. To disconnect, run
 `codex mcp remove lodex`; this does not remove the CLI, skill, or index.
 
 Tool operations run in worker threads, so a slow Ollama or SQLite call does not
@@ -297,7 +318,7 @@ existing SQLite FTS5 index without contacting Ollama and reports that semantic
 recall is unavailable; it is not used for database or embedding compatibility
 errors.
 
-The default database is `~/.local/share/lodex/lodex.db`. Lodex creates the data
+The default database is `~/.lodex/history/lodex.db`. Lodex creates the data
 directory with mode `0700` and the database with mode `0600`.
 
 ## Updating an existing history index

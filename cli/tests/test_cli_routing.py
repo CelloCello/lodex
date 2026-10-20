@@ -72,6 +72,8 @@ def check_help(command, path):
     result = runner.invoke(app, [*path, '--help'])
     assert result.exit_code == 0, (path, result.output)
     assert 'Usage:' in result.stdout and not result.stderr, path
+    if path == ['console']:
+        assert 'lodex[console]' in result.stdout, result.stdout
     if isinstance(command, TyperGroup):
         for name, child in command.commands.items():
             check_help(child, [*path, name])

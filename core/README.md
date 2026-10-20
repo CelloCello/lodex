@@ -1,6 +1,10 @@
 # Lodex Core
 
-Shared Python library for local task environments and coding-agent history.
+The shared Python library behind Lodex's tools for working with coding agents.
+It manages local task environments and retrieves coding-agent session history;
+the CLI exposes both workflows, MCP provides history queries, and the optional
+Console provides environment management.
+See the [main README](../README.md) for the user workflow and installation.
 
 - `src/lodex_core/management/`: project recipes, worktrees, SQLite registry,
   settings, secrets, foreground operations and independent service supervision.

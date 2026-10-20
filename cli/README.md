@@ -1,5 +1,12 @@
 # Lodex CLI
 
+The command-line entry point for Lodex, a local toolkit used alongside coding
+agents. Developers and agents use it to manage task checkouts, run repository
+commands and services, and retrieve earlier session context. It also packages
+optional agent skills and the read-only history MCP interface.
+
+See the [main README](../README.md) for the workflow, installation and quick start.
+
 The `lodex` Python distribution provides the `lodex` command. Its import package
 is `lodex_cli`; it depends on `lodex-core`, with `lodex-console` available through
 the `console` extra.

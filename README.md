@@ -1,20 +1,76 @@
-# Lodex
+<p align="center">
+  <img src="docs/assets/lodex-logo.svg" width="112" height="112" alt="Lodex logo" />
+</p>
 
-Lodex is a local-first CLI for two workflows:
+<h1 align="center">Lodex</h1>
 
-- **Local task environments**: register Git projects, create or attach worktrees,
-  resolve per-environment settings, run repository commands, and manage services.
-- **Session history**: index and search coding-agent transcripts using local
-  embeddings and full-text search. The bundled source adapter reads Codex sessions.
+<p align="center">
+  <strong>A local toolkit for working with coding agents.</strong><br />
+  Set up a checkout. Run your project. Recover earlier context.
+</p>
 
-The workflows have separate configuration and databases. Environment management
-works without Codex or Ollama. History indexing and hybrid search use a local
-Ollama model; MCP currently exposes history retrieval only.
+<p align="center">
+  <a href="#installation">Installation</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#guides">Documentation</a> ·
+  <a href="#optional-herdr-integration">Herdr integration</a>
+</p>
+
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-TW.md">繁體中文</a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-20332f?style=flat-square" alt="License: Apache 2.0" /></a>
+  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.2.0-20332f?style=flat-square" alt="Version 0.2.0" /></a>
+  <a href="#installation"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11 or newer" /></a>
+  <a href="docs/history.md#connect-codex-through-mcp"><img src="https://img.shields.io/badge/MCP-read--only_history-626b68?style=flat-square" alt="MCP: read-only history retrieval" /></a>
+</p>
+
+---
+
+Lodex is a local toolkit for developers working with coding agents. It helps you
+and your agent set up a checkout for a task, run its commands and services, and
+find useful context from earlier agent sessions.
+
+- **Set up a place to work**: register a Git repository, create or attach a
+  worktree, and give that checkout its own settings and allocated ports.
+- **Run and inspect the project**: run repository-defined preparation and
+  verification commands, start or stop services, and inspect results and logs.
+- **Recover earlier context**: search past coding-agent discussions to find
+  decisions, previous attempts and supporting evidence. The bundled history
+  source adapter currently reads Codex sessions.
+
+## Use Lodex with a coding agent
+
+The **CLI** provides the local tools. Optional **agent skills** guide your agent
+in using them for project setup, worktrees, services and history retrieval.
+**MCP** exposes read-only history search to an agent. The optional **Console**
+lets you inspect and operate the same task environments in a browser.
+
+For example, ask an agent to configure a repository with `lodex-project-setup`,
+create a checkout with `lodex-worktree`, and start the project's services with
+`lodex-services`. The agent edits code in that checkout; Lodex runs the configured
+commands and keeps environment state, results and logs available across sessions.
+Use `lodex-history` to look up earlier discussions when you need their context.
+
+Start with the [first website walkthrough](docs/manual-validation.md) for a guided
+agent-assisted workflow, or the [quick start](#quick-start) for direct CLI use.
+See [agent skills](#agent-skills) for installation. For coordinating multiple
+agents, see the [optional Herdr integration](#optional-herdr-integration).
+
+Environment management works independently of a particular coding agent and
+without Ollama. History has separate configuration and storage; indexing and
+hybrid search use a local Ollama model. MCP currently exposes history retrieval
+only; environment operations use the CLI or Console.
+
+## Guides
 
 - [Local task environments: configuration and command reference](docs/management.md)
 - [Session history: indexing, filters, configuration and MCP](docs/history.md)
 - [Optional local console](docs/console.md)
-- [First website walkthrough with installed Lodex](docs/manual-validation.md)
+- [Manager/worker workflow with Herdr](docs/herdr.md)
+- [First coding-agent workflow: build a small website](docs/manual-validation.md)
 - [Monorepo structure, development and packaging](docs/architecture.md)
 - [Self-contained multi-service fixture and isolation check](examples/multi_service/README.md)
 
@@ -209,7 +265,7 @@ logs, coding, commits and cleanup. Console is used primarily to observe shared s
 | `lodex-worktree` | Create, attach, inspect and remove task environments through the CLI. |
 | `lodex-services` | Operate task environment services and inspect their state and logs. |
 | `lodex-project-setup` | Set up a repository's `.lodex/project.toml` recipe. |
-| `lodex-herdr` | Coordinate agents through Herdr in Lodex-owned taskenvs, with manager/worker permission setup. |
+| `lodex-herdr` | Optional: coordinate agents through Herdr in Lodex-owned taskenvs. See [Herdr integration](#optional-herdr-integration). |
 
 ```bash
 lodex skill install lodex-worktree --dry-run
@@ -221,16 +277,27 @@ does not break them. Reinstalling an identical copy makes no change; an update
 replaces the whole installed skill, including local edits and stale files.
 For history MCP setup, see [Connect Codex through MCP](docs/history.md#connect-codex-through-mcp).
 
-For Herdr orchestration, install `lodex-herdr` and use it from a manager agent in
-a Herdr pane. Keep Herdr's own skill installed for its current CLI and interactive
-agent handling. Lodex owns worktree/service lifecycle; Herdr opens the checkout
-and runs the selected coding agent. The manager passes the worker's explicit
-permission configuration on every launch. The integration includes Codex profile
-templates and setup guidance; other agents require their own supported controls.
-Missing or changed permission settings are proposed for confirmation before they
-are applied. Skill installation itself does not change agent config, install
-Herdr, or launch agents. See the bundled [integration skill](cli/src/lodex_cli/bundled_skills/lodex-herdr/SKILL.md)
-and [Codex setup reference](cli/src/lodex_cli/bundled_skills/lodex-herdr/references/codex.md).
+## Optional Herdr integration
+
+For work involving multiple coding agents, you can combine Lodex with Herdr.
+A manager agent can prepare a separate task checkout for each worker, delegate
+work and collect results. Lodex manages the checkouts and services; Herdr provides
+the panes and agent processes. The `lodex-herdr` skill guides the manager through
+this workflow, connecting environment preparation with worker launches and follow-up.
+Lodex's CLI, Console, history tools and other skills work independently of Herdr.
+
+Keep the manager in the source repo and give each worker its own task checkout.
+For Codex, the suggested config names are `lodex-manager` and `lodex-worker`;
+these are config profiles, not Lodex commands or services. You start the manager
+with its profile; the manager then follows the skill to launch workers with theirs.
+Installing a skill does not configure or restart an agent.
+
+Follow the [Herdr guide](docs/herdr.md) for role setup, an optional
+manager shortcut, dispatch, verification and cleanup. Keep Herdr's own skill
+installed for current CLI and interactive agent handling. The bundled
+[integration skill](cli/src/lodex_cli/bundled_skills/lodex-herdr/SKILL.md) and
+[Codex setup reference](cli/src/lodex_cli/bundled_skills/lodex-herdr/references/codex.md)
+provide the detailed agent instructions and permission templates.
 
 ```bash
 lodex skill install lodex-herdr --dry-run
@@ -242,7 +309,12 @@ lodex skill install lodex-herdr
 | Workflow | Configuration | Default data location |
 | --- | --- | --- |
 | Environment management | Each checkout's `.lodex/project.toml`; allocated ports and central secrets in the registry | `~/.lodex/management.db`, logs and service handles under `~/.lodex` (`LODEX_HOME`) |
-| Session history | `~/.config/lodex/config.toml` (`LODEX_CONFIG`) | `~/.local/share/lodex/lodex.db` (`LODEX_DATA_DIR` / `LODEX_DB_PATH`) |
+| Session history | `~/.lodex/history/config.toml` (`LODEX_CONFIG`) | `~/.lodex/history/lodex.db` (`LODEX_DATA_DIR` / `LODEX_DB_PATH`) |
+
+`LODEX_HOME` changes the default root for both workflows (default `~/.lodex`).
+History reads `$LODEX_HOME/history/config.toml` when present and stores its index
+under `$LODEX_HOME/history/`. Explicit history path overrides take precedence;
+see [history configuration](docs/history.md#configuration) for the resolution rules.
 
 Management secrets are stored **in plaintext SQLite**, with private file
 permissions on POSIX. There is no encryption, key file or OS keychain dependency.
@@ -306,8 +378,7 @@ checkout. Development does not require a user-wide tool installation.
 
 ```bash
 uv sync --locked
-uv run lodex status
-uv run lodex index
+uv run lodex --help
 ```
 
 Workspace packages are installed editably into the root `.venv`. Use the wheel
@@ -337,3 +408,7 @@ The real Ollama contract test is marked separately:
 ```bash
 uv run pytest -m ollama core/tests/test_ollama_integration.py
 ```
+
+## License
+
+Lodex is licensed under the [Apache License 2.0](LICENSE).

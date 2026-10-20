@@ -52,7 +52,7 @@ export function Environments() {
     <>
       <PageHeading
         title="Environments"
-        description="Your local checkouts, services and execution history."
+        description="Your local checkouts, services and command results."
       >
         <EnvironmentForm kind="attach" project={project || undefined} />
         <EnvironmentForm kind="create" project={project || undefined} />
@@ -108,7 +108,7 @@ export function Environments() {
           }
         >
           Register a repository, then create a worktree or attach an existing
-          checkout.
+          checkout for you and your coding agent.
         </Empty>
       ) : !tasks.length ? (
         <Empty

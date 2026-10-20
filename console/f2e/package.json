@@ -1,6 +1,8 @@
 {
   "name": "lodex-console",
+  "description": "Optional web console for local task environments in coding-agent workflows",
   "private": true,
+  "license": "Apache-2.0",
   "version": "0.2.0",
   "packageManager": "pnpm@10.28.2",
   "engines": {

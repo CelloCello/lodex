@@ -57,10 +57,11 @@ def _expand_path(value: str) -> Path:
 
 
 def load_config(environment: Mapping[str, str] | None = None) -> AppConfig:
-    """Load optional TOML configuration, then apply environment overrides."""
+    """Resolve history defaults under LODEX_HOME, then apply configuration overrides."""
 
     env = os.environ if environment is None else environment
-    config_path = _expand_path(env.get("LODEX_CONFIG", "~/.config/lodex/config.toml"))
+    history_dir = _expand_path(env.get("LODEX_HOME", "~/.lodex")) / "history"
+    config_path = _expand_path(env.get("LODEX_CONFIG", str(history_dir / "config.toml")))
     raw: Mapping[str, Any] = {}
     if config_path.exists():
         try:
@@ -81,7 +82,7 @@ def load_config(environment: Mapping[str, str] | None = None) -> AppConfig:
     data_dir_value = (
         env.get("LODEX_DATA_DIR")
         or _string(paths.get("data_dir"), key="paths.data_dir")
-        or "~/.local/share/lodex"
+        or str(history_dir)
     )
     data_dir = _expand_path(data_dir_value)
     db_path_value = env.get("LODEX_DB_PATH") or _string(paths.get("db_path"), key="paths.db_path")

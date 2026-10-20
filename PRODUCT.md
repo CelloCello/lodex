@@ -8,18 +8,20 @@ web
 
 ## Users
 
-Developers managing several local repositories and worktrees, switching between
-terminal, coding agent and browser. They need to identify a local environment,
-prepare it, inspect services and execution results, and stop or clean it deliberately.
+Developers working with coding agents across local repositories and worktrees,
+switching between terminal, agent and browser. They need to identify a local
+environment, prepare it, inspect services and execution results, and stop or clean
+it deliberately.
 They also use session history to retrieve earlier coding-agent discussions and evidence.
 The browser console is an optional companion to the independently usable CLI.
 
 ## Product Purpose
 
-Make local task environments identifiable and operable across callers, and make
-coding-agent session history retrievable as a separate workflow. A developer or
-agent can find the same environment by checkout path or stable ID, inspect its
-recorded state, and explicitly choose the next operation.
+Help developers and their coding agents set up task checkouts, run project
+commands and services, and recover useful context from earlier agent sessions.
+A developer or agent can find the same environment by checkout path or stable ID,
+inspect its recorded state, and explicitly choose the next operation. History
+retrieval provides earlier discussions and evidence through a separate workflow.
 
 Success means developers can operate multiple environments independently, understand
 known results and unresolved outcomes, and recover relevant historical context.
@@ -27,13 +29,19 @@ It does not mean Lodex makes development, review or Git integration decisions fo
 
 ## Positioning
 
-Lodex is a local-first CLI with a shared management core and an optional web console.
+Lodex is a local toolkit for developers working with coding agents. The CLI
+provides environment and history tools; optional skills guide agents in using
+them, MCP exposes read-only history retrieval, and an optional web console lets
+developers inspect and operate the same local environments. These interfaces use
+a shared Python core.
+
 Environment identity and service management belong to the local environment, not
 to a particular coding-agent session. Repositories describe their own commands and
 services in each checkout's `.lodex/project.toml`; Lodex supplies environment values,
 executes explicit requests, and records known outcomes.
 
-Session history has separate configuration and storage. Environment management
+Session history has separate configuration and storage under the shared
+`LODEX_HOME/history` default. Environment management
 does not depend on Codex, Ollama or the history index. Lodex is not a task tracker,
 agent orchestrator, hosted control plane or general workflow engine.
 

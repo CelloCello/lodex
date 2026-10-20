@@ -159,7 +159,7 @@ def index(
     ] = False,
     as_json: Json = False,
 ) -> int:
-    """Build or incrementally refresh the history index."""
+    """Build or incrementally refresh the coding-agent session history index."""
     from lodex_core.history import queries
     from lodex_core.history.indexer import Indexer
     from lodex_core.history.sources import CodexSessionSource
@@ -204,7 +204,7 @@ def search(
     ] = False,
     as_json: Json = False,
 ) -> int:
-    """Search indexed sessions using hybrid or explicit lexical retrieval."""
+    """Find prior coding-agent discussions using hybrid or explicit lexical search."""
     from lodex_core.history import queries
 
     with configuration() as config:
@@ -261,7 +261,10 @@ def rebuild(yes: Yes = False, as_json: Json = False) -> int:
 
 
 def mcp() -> int:
-    """Serve read-only history status/search/show tools over MCP stdio."""
+    """Serve read-only session history tools for coding agents over MCP stdio.
+
+    Exposes status, search and show; environment operations use the CLI or Console.
+    """
     with history_errors():
         from lodex_cli.mcp_server import create_server
 

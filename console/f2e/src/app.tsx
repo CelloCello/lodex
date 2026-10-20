@@ -18,7 +18,6 @@ import {
   Menu,
   Monitor,
   RefreshCw,
-  Terminal,
   X,
 } from "lucide-react";
 import { ConsoleContext, useConsoleState } from "@/lib/console";
@@ -88,19 +87,23 @@ export function App() {
       <div className="app-shell">
         <aside className="sidebar">
           <Link className="brand" to="/environments">
-            <span className="brand-mark">
-              <Terminal size={20} />
-            </span>
+            <img
+              className="brand-mark"
+              src="/lodex-logo.svg"
+              width="32"
+              height="32"
+              alt=""
+            />
             lodex<span className="brand-caption">Console</span>
           </Link>
           {navigation}
           <div className="sidebar-footer">
             <div>
               <Monitor size={15} />
-              <span>Local workspace</span>
+              <span>For coding agents</span>
             </div>
             <p>
-              Shared with your CLI.
+              Shared with your CLI and agent.
               <br />
               Services stay running when you leave.
             </p>
@@ -217,8 +220,19 @@ export function App() {
         <Dialog open={menu} onOpenChange={setMenu}>
           <DialogContent className="mobile-navigation">
             <DialogHeader>
-              <DialogTitle>lodex</DialogTitle>
-              <DialogDescription>Local workspace console</DialogDescription>
+              <DialogTitle className="brand">
+                <img
+                  className="brand-mark"
+                  src="/lodex-logo.svg"
+                  width="32"
+                  height="32"
+                  alt=""
+                />
+                lodex
+              </DialogTitle>
+              <DialogDescription>
+                Local environments for work with your coding agent.
+              </DialogDescription>
             </DialogHeader>
             {navigation}
           </DialogContent>

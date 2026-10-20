@@ -1,5 +1,11 @@
 # Self-contained multi-service fixture
 
+This fixture validates the environment tools that developers and coding agents
+use through Lodex: preparing separate task checkouts, running their services,
+inspecting results and cleaning up. See the [main README](../../README.md) for
+the overall workflow, or the [first website walkthrough](../../docs/manual-validation.md)
+to try Lodex with a coding agent.
+
 This example exercises Lodex without another application repository, Docker or
 third-party services. It uses Python's standard library: two loopback HTTP servers,
 one worker, a SQLite application database and a separate SQLite queue. Each taskenv

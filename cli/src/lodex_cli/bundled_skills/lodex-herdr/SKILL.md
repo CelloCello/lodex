@@ -111,7 +111,9 @@ authorized dependency or correct a confirmed setup, then continue with the same
 taskenv. Do not repeatedly send the same failing instruction.
 
 Workers run the agreed direct tests and return changed files, diff, results and
-remaining blockers. The manager checks those results and, when appropriate, runs
+remaining blockers. Confirm the worker has stopped editing before final review,
+verification or integration. The manager inspects changes, including untracked
+files, checks those results and, when appropriate, runs
 `lodex run verify --target ID --json` to record verification. This writes central
 Lodex state. It also executes the checkout's recipe/scripts with the manager's
 execution permissions: inspect relevant changes first, and use a separately

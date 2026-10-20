@@ -25,6 +25,36 @@ from .support.history import configure_cli
 from .support.search import insert, session
 
 
+def test_cli_and_mcp_share_history_selected_only_by_lodex_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from lodex_cli import main as cli
+
+    configure_cli(monkeypatch, tmp_path)
+    home = tmp_path / "lodex-home"
+    monkeypatch.setenv("LODEX_HOME", str(home))
+    for name in ("LODEX_CONFIG", "LODEX_DATA_DIR", "LODEX_DB_PATH"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert cli.main(["index", "--json"]) == 0
+    capsys.readouterr()
+    assert cli.main(["status", "--json"]) == 0
+    expected = json.loads(capsys.readouterr().out)
+    assert expected["database"]["path"] == str(home / "history/lodex.db")
+
+    async def check() -> None:
+        server = create_server()
+        status: Any = await server.call_tool("status", {})
+        assert status[1] == expected
+        search: Any = await server.call_tool("search", {"query": "parser", "project": None})
+        assert search[1]["count"] == 1
+        hit = search[1]["results"][0]
+        result: Any = await server.call_tool("show", {"chunk_id": hit["chunk_id"]})
+        assert result[1]["chunk_id"] == hit["chunk_id"]
+
+    anyio.run(check)
+
+
 def test_mcp_hybrid_and_errors_use_existing_retrieval(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -1,12 +1,14 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [project]
 name = "lodex-core"
 version = "0.2.0"
-description = "Shared local environment management and session history for Lodex"
+description = "Shared task environment and session history tools for coding-agent workflows"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
   "httpx>=0.28,<0.29",

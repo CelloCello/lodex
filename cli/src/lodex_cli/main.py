@@ -16,7 +16,12 @@ from lodex_cli.support import LodexGroup
 
 app = typer.Typer(
     cls=LodexGroup,
-    help="Lodex: local task environments and session history.",
+    help=(
+        "Lodex: a local toolkit for developers working with coding agents.\n\n"
+        "Set up task checkouts, run project commands and services, and recover "
+        "context from earlier agent sessions."
+    ),
+    rich_markup_mode=None,
     add_completion=False,
     pretty_exceptions_enable=False,
     pretty_exceptions_show_locals=False,
@@ -42,7 +47,11 @@ history_cli.register(app)
 
 @app.command()
 def console(port: Annotated[int, typer.Option(min=0, max=65535)] = 0) -> int:
-    """Open a loopback console (install lodex[console]); Ctrl-C stops this server."""
+    """Open the local task environment console (install lodex[console]).
+
+    Inspect and operate environments shared with your CLI and coding agent.
+    Ctrl-C stops this server; managed services keep running.
+    """
     try:
         from lodex_console.app import serve
     except ImportError as exc:
