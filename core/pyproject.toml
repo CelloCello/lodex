@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lodex-core"
+version = "0.2.0"
+description = "Shared task environment and session history tools for coding-agent workflows"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.28,<0.29",
+  "ollama>=0.6,<0.7",
+  "sqlite-vec>=0.1.9,<0.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lodex_core"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "README.md", "pyproject.toml"]

@@ -1,0 +1,17 @@
+# Template: inspect inherited settings/tools via references/codex.md first.
+# Launch with -C set to exactly one Lodex checkout and no extra writable roots.
+approval_policy = "never"
+default_permissions = "lodex-worker"
+
+[permissions.lodex-worker]
+extends = ":workspace"
+
+[permissions.lodex-worker.network]
+enabled = false
+
+# Deliberately no Lodex state grant, Herdr socket grant, or Git write override.
+# Omitting grants here does not revoke inherited grants; review them explicitly.
+# Add explicit per-server/per-plugin disables after inspecting local config.
+# Example for an existing MCP server named computer-use:
+# [mcp_servers.computer-use]
+# enabled = false

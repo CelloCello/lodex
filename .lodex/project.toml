@@ -1,0 +1,8 @@
+schema_version = 1
+tools = ["uv"]
+
+[commands.prepare]
+argv = ["uv", "sync", "--locked"]
+
+[commands.verify]
+argv = ["uv", "run", "pytest", "-m", "not ollama"]

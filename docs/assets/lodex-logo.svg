@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title description">
+  <title id="title">Lodex</title>
+  <desc id="description">A cream L with a short foot and a peach forward chevron on a dark green background: a local toolkit for working with coding agents.</desc>
+  <rect x="8" y="8" width="240" height="240" rx="48" fill="#20332f"/>
+  <path d="M70 66h12q6 0 6 6v86q0 6 6 6h12q6 0 6 6v12q0 6-6 6H70q-6 0-6-6V72q0-6 6-6Z" fill="#f6f3eb"/>
+  <path d="M143 76q4-4 8 0l44 44q8 8 0 16l-44 44q-4 4-8 0l-8-8q-4-4 0-8l36-36-36-36q-4-4 0-8Z" fill="#f2b18e"/>
+</svg>

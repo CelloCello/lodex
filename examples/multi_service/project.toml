@@ -1,0 +1,36 @@
+schema_version = 1
+tools = ["python3"]
+
+[ports]
+API_PORT = 0
+QUEUE_PORT = 0
+
+[env]
+APP_NAME = "fixture_${LODEX_TASKENV_ID}"
+
+[secrets]
+API_TOKEN = "secret:fixture-token"
+
+[commands.prepare]
+argv = ["python3", ".lodex/scripts/fixture.py", "prepare"]
+scripts = [".lodex/scripts/fixture.py"]
+[commands.verify]
+argv = ["python3", ".lodex/scripts/fixture.py", "verify"]
+scripts = [".lodex/scripts/fixture.py"]
+[commands.cleanup]
+argv = ["python3", ".lodex/scripts/fixture.py", "cleanup"]
+scripts = [".lodex/scripts/fixture.py"]
+
+[services.api]
+argv = ["python3", ".lodex/scripts/fixture.py", "api"]
+scripts = [".lodex/scripts/fixture.py"]
+ready_port = "API_PORT"
+url = "http://127.0.0.1:${API_PORT}"
+[services.queue]
+argv = ["python3", ".lodex/scripts/fixture.py", "queue"]
+scripts = [".lodex/scripts/fixture.py"]
+ready_port = "QUEUE_PORT"
+url = "http://127.0.0.1:${QUEUE_PORT}"
+[services.worker]
+argv = ["python3", ".lodex/scripts/fixture.py", "worker"]
+scripts = [".lodex/scripts/fixture.py"]

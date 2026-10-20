@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install Python dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: uv run --locked ruff check .
+      - name: Check formatting
+        run: uv run --locked ruff format --check .
+      - name: Check types
+        run: uv run --locked mypy
+      - name: Run tests
+        run: uv run --locked pytest -m "not ollama"
+
+  console:
+    name: Console checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install Python dependencies for browser fixtures
+        run: uv sync --locked
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: console/f2e/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: console/f2e/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        run: pnpm --dir console/f2e install --frozen-lockfile
+      - name: Check frontend formatting
+        run: pnpm --dir console/f2e run format:check
+      - name: Type-check and build frontend
+        run: pnpm --dir console/f2e run build
+      - name: Install Chromium and system dependencies
+        run: pnpm --dir console/f2e exec playwright install --with-deps chromium --only-shell
+      - name: Run browser tests
+        run: pnpm --dir console/f2e test --trace retain-on-failure
+      - name: Upload browser failure details
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: console-test-results
+          path: console/f2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
