@@ -22,7 +22,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-20332f?style=flat-square" alt="授權：Apache 2.0" /></a>
-  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.2.0-20332f?style=flat-square" alt="版本 0.2.0" /></a>
+  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.3.0-20332f?style=flat-square" alt="版本 0.3.0" /></a>
   <a href="#安裝"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11 以上" /></a>
   <a href="docs/history.md#connect-codex-through-mcp"><img src="https://img.shields.io/badge/MCP-read--only_history-626b68?style=flat-square" alt="MCP：唯讀歷史查詢" /></a>
 </p>
@@ -81,7 +81,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --find-links dist dist/lodex-0.2.0-py3-none-any.whl
+uv tool install --find-links dist dist/lodex-0.3.0-py3-none-any.whl
 lodex --version
 lodex --help
 ```
@@ -93,7 +93,7 @@ lodex --help
 安裝後即可在任意目錄啟動：
 
 ```bash
-uv tool install --force --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 lodex console --port 8765
 ```
 
@@ -322,7 +322,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --force --reinstall --find-links dist dist/lodex-0.2.0-py3-none-any.whl
+uv tool install --force --reinstall --find-links dist dist/lodex-0.3.0-py3-none-any.whl
 lodex skill install lodex-history --dry-run
 lodex skill install lodex-history
 ```
@@ -330,7 +330,7 @@ lodex skill install lodex-history
 若已安裝 Console，請將上面的 `uv tool install` 命令替換為：
 
 ```bash
-uv tool install --force --reinstall --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --reinstall --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 ```
 
 已安裝的 Console 會提供 Server wheel 內附的前端資源。

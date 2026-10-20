@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lodex-console"
-version = "0.2.0"
+version = "0.3.0"
 description = "Optional web console for local task environments in coding-agent workflows"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
-  "lodex-core==0.2.0",
+  "lodex-core==0.3.0",
   "fastapi>=0.115,<1",
   "pydantic>=2.11,<3",
   "uvicorn>=0.30,<1",

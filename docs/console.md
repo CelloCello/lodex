@@ -20,7 +20,7 @@ to an existing CLI installation):
 
 ```bash
 cd /absolute/path/to/lodex
-uv tool install --force --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 ```
 
 After installation, start the console from any directory:
@@ -174,13 +174,13 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --force --reinstall --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --reinstall --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 ```
 
 Keep `--reinstall` when rebuilding the same package version so the dependency
 packages, including Console Server, are reinstalled too. Stop the old console
 process with Ctrl+C, start `lodex console --port 8765` again, then open its new
-token URL. These wheel names match the current 0.2.0 release; use the corresponding
+token URL. These wheel names match the current 0.3.0 release; use the corresponding
 filename when the package version changes.
 
 ## Development and distribution

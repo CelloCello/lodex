@@ -22,7 +22,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-20332f?style=flat-square" alt="License: Apache 2.0" /></a>
-  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.2.0-20332f?style=flat-square" alt="Version 0.2.0" /></a>
+  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.3.0-20332f?style=flat-square" alt="Version 0.3.0" /></a>
   <a href="#installation"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11 or newer" /></a>
   <a href="docs/history.md#connect-codex-through-mcp"><img src="https://img.shields.io/badge/MCP-read--only_history-626b68?style=flat-square" alt="MCP: read-only history retrieval" /></a>
 </p>
@@ -88,7 +88,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --find-links dist dist/lodex-0.2.0-py3-none-any.whl
+uv tool install --find-links dist dist/lodex-0.3.0-py3-none-any.whl
 lodex --version
 lodex --help
 ```
@@ -101,7 +101,7 @@ For the optional browser console, install the extra from the release set built
 above. You can then start the installed console from any directory:
 
 ```bash
-uv tool install --force --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 lodex console --port 8765
 ```
 
@@ -345,7 +345,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --force --reinstall --find-links dist dist/lodex-0.2.0-py3-none-any.whl
+uv tool install --force --reinstall --find-links dist dist/lodex-0.3.0-py3-none-any.whl
 lodex skill install lodex-history --dry-run
 lodex skill install lodex-history
 ```
@@ -353,7 +353,7 @@ lodex skill install lodex-history
 For an installation with Console, replace the `uv tool install` command above with:
 
 ```bash
-uv tool install --force --reinstall --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --reinstall --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 ```
 
 The installed console serves the assets bundled in its Server wheel. Editing the
