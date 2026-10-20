@@ -5,7 +5,7 @@
 第一次使用請先走完 [已安裝版本的網站操作教學](manual-validation.md)。
 本篇是較完整的開發驗證流程，需要 Lodex 原始碼工作區。
 
-這份流程驗證你與 coding agent 共用的環境工具：建立 checkout、執行命令、管理服務與清理資源。
+這份流程驗證你與 coding agent 共用的環境工具：建立 worktree、執行命令、管理服務與清理資源。
 透過 CLI 與 Console 操作，檢查同一環境的狀態與結果是否一致；agent 搭配 skills 的用法見前述教學。
 建議預留 30–45 分鐘，依序完成；只想快速看介面，可先用
 [現有瀏覽器 fixture](../console/f2e/README.md#manual-verification)。
@@ -16,7 +16,7 @@
 
 ## 1. 準備測試場地（終端 A）
 
-以下以 macOS 的 zsh／bash 與目前 checkout 為準。先在 Lodex 根目錄準備開發環境：
+以下以 macOS 的 zsh／bash 與目前原始碼工作目錄為準。先在 Lodex 根目錄準備開發環境：
 
 ```sh
 cd /absolute/path/to/lodex
@@ -124,26 +124,28 @@ fixture 的 Python 路徑固定為目前 workspace 的直譯器，測試途中�
 在**終端 B**執行剛才印出的命令，開啟它印出的完整 `#token=...` URL。
 Console 自動挑選可用 port，終端 B 要保持開啟。
 
-1. 確認 Environments、Projects、Secrets 都是空的；若出現既有專案，先停下並檢查啟動命令的 `LODEX_HOME`。
-2. 在 Projects → Register project，名稱填 `manual-demo`，路徑填剛才的 repo 絕對路徑；Configuration source 留空。
-3. 確認 Projects 有新專案，但 Environments 仍為空。註冊不會自動 attach、prepare 或啟動服務。
-4. 在 New worktree 選 `manual-demo`，Starting Git ref 填 `HEAD`，New branch 填 `manual/a`；Configuration source 留空。
-5. 再建立 `manual/b`。開啟兩個環境，確認 ID、checkout 路徑不同，且沒有已啟動的服務。
+1. 確認 Overview 沒有環境、側欄沒有專案、Secrets 為空；若出現既有專案，先停下並檢查啟動命令的 `LODEX_HOME`。
+2. 在側欄 Projects 旁按「＋」，Path 填剛才的 repo 絕對路徑，Name 填 `Manual demo`；展開 Options，Project ID 改為 `manual-demo`，Config source 留空，按 Add。
+   專案選單或標題旁的 Edit 可以修改顯示名稱；後續 CLI 仍使用固定 ID `manual-demo`。
+   選單的 Pin／Unpin 應在重新整理後保留排序；專案已有環境時，Delete 應明確阻擋。
+3. 確認側欄有新專案，但仍沒有環境。點專案名稱，確認頁首來源路徑與 Details 中的設定來源。註冊不會自動 attach、prepare 或啟動服務。
+4. 按 Manual demo 右側「＋ → New worktree」，Start from 填 `HEAD`，Branch 填 `manual/a`；Config source 留空，按 Create。
+5. 再建立 `manual/b`。開啟兩個環境，確認 ID、worktree 路徑不同，且沒有已啟動的服務。
 
-將環境 A／B 詳情頁顯示的 **ID 與 Checkout** 填入終端 A（替換四個佔位字串）：
+將環境 A／B 詳情頁顯示的 **ID 與 Path** 填入終端 A（Path 是 worktree 的絕對路徑；替換四個佔位字串）：
 
 ```sh
 LODEX_MANUAL_A='環境 A 的 ID'
 LODEX_MANUAL_B='環境 B 的 ID'
-LODEX_MANUAL_A_PATH='環境 A 的 Checkout 絕對路徑'
-LODEX_MANUAL_B_PATH='環境 B 的 Checkout 絕對路徑'
+LODEX_MANUAL_A_PATH='環境 A 的 Worktree 絕對路徑'
+LODEX_MANUAL_B_PATH='環境 B 的 Worktree 絕對路徑'
 lx project list
 lx worktree list
 lx context --target "$LODEX_MANUAL_A"
 ```
 
 **通過條件：** CLI 顯示的專案、ID、路徑與 Console 一致，且兩個 worktree 都在測試根目錄下。
-畫面的 `Checkout available` 只代表目錄存在，不代表 prepare 成功。
+畫面的 `Available` 只代表目錄存在，不代表 prepare 成功。
 
 ## 3. 缺少 secret → 明確修復 → prepare／verify
 
@@ -221,7 +223,7 @@ lx secret list
 4. 明確 Start A。新 URL 應可連線；B 的 port 與頁面不變。
 
 **通過條件：** 改 port 不會自動重啟服務；CLI 與 Console 看到同一份設定。
-改 port 後既有 `.env` 不會自動更新。一般值與 secret 引用需編輯各 checkout 的
+改 port 後既有 `.env` 不會自動更新。一般值與 secret 引用需編輯各 worktree 的
 `.lodex/project.toml`，目前沒有 Console 一般設定編輯器或 DB 覆寫層。
 
 ## 7. 配色、導覽、鍵盤與窄螢幕
@@ -258,23 +260,23 @@ lx secret list
    rm -- "$LODEX_MANUAL_A_PATH/keep-me.txt"
    ```
 
-5. 執行 Run cleanup。Resources 最新觀察應為 `removed`，checkout 與紀錄仍在。
+5. 執行 Run cleanup。Resources 最新觀察應為 `removed`，worktree 與紀錄仍在。
 6. 再 Remove A，應成功。A 的目錄（包含 ignored `.env`）被移除，紀錄仍可檢查，Git 分支仍保留。
 7. **立即重新整理 B 的 HTTP URL**，仍應正常且 ID 為 B。
-8. 對 A 執行 Forget；它才從環境列表消失。
+8. 對 A 執行 Unregister；它才從環境列表消失。
 
-### 主 checkout：只能解除登記，不能移除
+### 主 worktree：只能取消註冊，不能移除
 
-1. 在 Projects → Attach checkout，選 `manual-demo`，路徑填最初測試 repo。
-2. 詳情應標示 Main checkout，Preview removal 按鈕應停用，並說明主 checkout 不可移除；repo 仍存在。
-3. 對它執行 Forget，repo 與檔案仍應存在。不要對它執行 prepare 或啟動服務。
+1. 按 Manual demo 右側「＋ → Use existing」，Path 填最初測試 repo，按 Register。
+2. 詳情應標示 Main，Preview removal 按鈕應停用，並說明只有 Lodex 建立且仍存在的 worktree 可移除；repo 仍存在。
+3. 對它執行 Unregister，repo 與檔案仍應存在。不要對它執行 prepare 或啟動服務。
 
 ### B：完成正常清理
 
-依序 Stop `http` → Run cleanup → Remove → Forget。
+依序 Stop `http` → Run cleanup → Remove worktree → Unregister。
 到 Secrets 確認 `manual-token` 仍在，再手動刪除該假 secret。
 
-**通過條件：** cleanup 執行 repo 清理、remove 刪除 owned checkout、forget 解除登記，三者效果不同。
+**通過條件：** cleanup 執行 repo 清理、remove 刪除 owned worktree、forget 取消註冊，三者效果不同。
 Secrets 不隨環境清理而刪除，因為同一管理資料庫中的名稱可以被其他環境共用。
 
 ## 9. 收尾與記錄

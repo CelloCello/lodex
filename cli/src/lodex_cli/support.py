@@ -134,7 +134,12 @@ class LodexGroup(TyperGroup):
         message = exc.format_message() if isinstance(exc, UsageError) else str(exc)
         if command in MANAGEMENT_COMMANDS:
             if "--json" in raw:
-                print(json.dumps({"ok": False, "error": {"code": error_code, "message": message}}))
+                payload = (
+                    exc.as_dict()
+                    if isinstance(exc, ManagementError)
+                    else {"code": error_code, "message": message}
+                )
+                print(json.dumps({"ok": False, "error": payload}))
             else:
                 print(f"lodex: {error_code}: {message}", file=sys.stderr)
         elif command == "skill":

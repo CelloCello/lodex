@@ -49,13 +49,23 @@ agent orchestrator, hosted control plane or general workflow engine.
 
 - Developers alternate between the terminal, coding agents and the local browser
   console. CLI and Console Server call the same Python core and management database.
-- A project is a registered local Git repository. A taskenv associates one checkout
-  with settings, allocated values, services, known resources and operation records.
+- A project is a registered local Git repository. An environment (internally
+  taskenv) associates one Git worktree with settings, allocated values, services,
+  known resources and operation records.
   A branch name is observed context, not the environment's identity.
-- Registering a project, creating or attaching a checkout, preparing it, starting
+  Projects may have an editable display name; the project ID remains fixed for
+  CLI selection, environment associations and worktree paths. Older registrations
+  without a display name continue to show their ID.
+  Pins persist in project records and order the Console sidebar. Project deletion
+  removes only an empty registration, after preview/confirmation; Core blocks it
+  while environment registrations remain and keeps Git directories and other records.
+- User-facing Console copy calls the managed record an Environment and the physical
+  Git directory a worktree, including the main worktree. Definitions and lifecycle
+  distinctions are in `docs/management.md#terminology`.
+- Registering a project, creating or attaching a worktree, preparing it, starting
   services, cleaning resources, removing a worktree and forgetting registration are
   distinct actions. Repository capabilities determine which actions are available.
-- Each operation reads the checkout's current TOML. Configuration files are local
+- Each operation reads the worktree's current TOML. Configuration files are local
   to each worktree; missing-file provisioning is not ongoing synchronization.
 - The console is served on loopback with bundled assets. Installed use needs no
   Node.js or Vite server. Closing the console does not stop managed services.

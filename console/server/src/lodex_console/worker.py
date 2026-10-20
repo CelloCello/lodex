@@ -23,7 +23,7 @@ def main() -> None:
         )
         response = {"ok": ok, "result": result}
     except ManagementError as exc:
-        response = {"ok": False, "error": {"code": exc.code, "message": str(exc)}}
+        response = {"ok": False, "error": exc.as_dict()}
     except Exception:
         # Validation errors and tracebacks can contain submitted secret values.
         response = {

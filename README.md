@@ -22,7 +22,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-20332f?style=flat-square" alt="License: Apache 2.0" /></a>
-  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.2.0-20332f?style=flat-square" alt="Version 0.2.0" /></a>
+  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.3.0-20332f?style=flat-square" alt="Version 0.3.0" /></a>
   <a href="#installation"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11 or newer" /></a>
   <a href="docs/history.md#connect-codex-through-mcp"><img src="https://img.shields.io/badge/MCP-read--only_history-626b68?style=flat-square" alt="MCP: read-only history retrieval" /></a>
 </p>
@@ -88,7 +88,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --find-links dist dist/lodex-0.2.0-py3-none-any.whl
+uv tool install --find-links dist dist/lodex-0.3.0-py3-none-any.whl
 lodex --version
 lodex --help
 ```
@@ -101,7 +101,7 @@ For the optional browser console, install the extra from the release set built
 above. You can then start the installed console from any directory:
 
 ```bash
-uv tool install --force --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 lodex console --port 8765
 ```
 
@@ -120,9 +120,15 @@ to make checkout changes available in an installed release.
 
 ### Manage a local task environment
 
-A project is a registered local Git repository. A task environment associates
-one checkout with settings, allocated ports, command records and services.
-Registering a project does not automatically attach its existing checkout.
+A project is a registered local Git repository. An environment (task environment,
+internally `taskenv`) associates one Git worktree with settings, allocated ports,
+command records and services. A worktree is the physical Git working directory;
+the environment record can remain after that directory is removed.
+Registering a project does not automatically register an environment for its main
+worktree. See the [shared terminology](docs/management.md#terminology).
+Projects can have an editable display name (`project add … --display-name TEXT`;
+`project rename ID NAME`). Commands and existing environments continue using the
+fixed project ID; older registrations display that ID until named.
 
 `project add` validates and keeps an existing `.lodex/project.toml`. If it is
 missing, it creates a minimal skeleton, or copies the recipe passed with
@@ -339,7 +345,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --force --reinstall --find-links dist dist/lodex-0.2.0-py3-none-any.whl
+uv tool install --force --reinstall --find-links dist dist/lodex-0.3.0-py3-none-any.whl
 lodex skill install lodex-history --dry-run
 lodex skill install lodex-history
 ```
@@ -347,7 +353,7 @@ lodex skill install lodex-history
 For an installation with Console, replace the `uv tool install` command above with:
 
 ```bash
-uv tool install --force --reinstall --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --reinstall --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 ```
 
 The installed console serves the assets bundled in its Server wheel. Editing the

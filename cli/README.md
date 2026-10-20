@@ -1,7 +1,7 @@
 # Lodex CLI
 
 The command-line entry point for Lodex, a local toolkit used alongside coding
-agents. Developers and agents use it to manage task checkouts, run repository
+agents. Developers and agents use it to manage task environments, run repository
 commands and services, and retrieve earlier session context. It also packages
 optional agent skills and the read-only history MCP interface.
 

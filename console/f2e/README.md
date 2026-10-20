@@ -1,6 +1,6 @@
 # Console frontend
 
-The browser UI for Lodex's optional Console: inspect task checkouts, run configured
+The browser UI for Lodex's optional Console: inspect environments, run configured
 commands, and view or control services while working with a coding agent. It uses
 the same management state as the CLI through the Console server.
 See the [main README](../../README.md) for the overall workflow and
@@ -61,11 +61,11 @@ to that port when launching it manually.
 
 | Check | Steps and expected result |
 | --- | --- |
-| Appearance | Try Light, Dark and System across lists, details and a New worktree dialog. An explicit theme survives reload; System follows OS appearance changes. Text, placeholders and focus indicators remain readable. |
-| Navigation | Search and filter Environments, open a detail tab, then reload or go back. The URL preserves the tab and filters. Projects and Secrets remain reachable. |
+| Appearance | Try Light, Dark and System across lists, details and the New worktree dialog. An explicit theme survives reload; System follows OS appearance changes. Text, placeholders and focus indicators remain readable. |
+| Navigation | Open a project name directly, toggle its tree independently, and search outside the six-item preview. Source information is under Details on the same list page. Filters, pagination and detail tabs survive reload/back; legacy project links redirect to the combined page. |
 | Services and commands | Open the fixture HTTP URL, read logs, Stop and Start its service; run prepare and verify in Operations. State and execution output update. Reload after completion does not run a command again. |
 | Secrets | Save a dummy value, confirm the input clears and the value is not shown in the list, then delete it. |
-| Create and remove | Create `feature/manual-ui-check`; it should not start services automatically. Inspect the removal scope, cancel once, then remove that new worktree. Force starts unchecked. Removal retains its evidence record; Forget is a separate action. |
+| Create and remove | Create `feature/manual-ui-check`; it should not start services automatically. Inspect the removal scope, cancel once, then remove that new worktree. Force starts unchecked. Removal retains its evidence record; Unregister is a separate action. |
 | Keyboard and mobile | Use Tab and Esc in dialogs and check focus returns to the opener. At about 390px width, check both themes, mobile navigation and forms for overlap or page-wide horizontal overflow; wide data tables may scroll within their container. |
 
 Press Ctrl+C in the fixture terminal when finished. Its shutdown stops fixture
@@ -80,7 +80,9 @@ to Lodex. The admin example application and its authentication, charts and store
 are not bundled.
 
 - `src/app.tsx`: application shell, responsive navigation and routes.
-- `src/pages/`: environment list/detail, projects and shared secrets.
+- `src/pages/`: Overview dashboard, environment list/detail, projects and shared secrets.
+- `src/components/project-navigation.tsx`: persistent project tree, full-registry search and shared desktop/mobile expansion state.
+- `src/lib/environments.ts`: shared attention, service grouping, environment ordering and latest-operation semantics.
 - `src/components/ui/`: shadcn primitives generated with `components.json`.
 - `src/components/`: environment forms, scope confirmations and shared displays.
 - `src/lib/console.tsx`: TanStack Query overview/detail reads and explicit action
@@ -106,7 +108,7 @@ without an internet connection. Automatic retries, focus refetching and reconnec
 refetching are disabled. Manual Refresh and successful or failed write actions
 cancel earlier reads and invalidate cached state. Refresh reads the overview
 first, then reads the currently selected detail only if it is still registered. A
-successful Forget does not query the removed registration as part of that refresh.
+successful Unregister does not query the removed registration as part of that refresh.
 
 Ordinary writes use `useMutation` with `retry: false` and `networkMode: "always"`.
 Its pending state includes the refresh returned by `onSettled`, after either
@@ -140,6 +142,33 @@ mount. The initial token fragment is consumed before the router mounts; subseque
 routes contain no credentials. List filters live in search parameters inside the
 hash. Detail tabs use manual keyboard activation (arrow keys to focus, Enter/Space
 to select), so focus does not create extra history entries.
+
+Overview (`/dashboard`) is the entry route. `/environments` retains the complete
+list and existing deep links; project selection, filters and eight-row pagination
+are URL state. The tree remains mounted while the right-hand page changes, and
+desktop/mobile menus share search and expanded projects. Plus buttons open the
+existing form workflow through a create/attach choice. The dashboard derives
+its snapshot from the existing overview query; it adds no writes or telemetry.
+Service bars use SVG attributes and bundled CSS, preserving the strict CSP.
+
+Project source details and the environment list share `/environments?project=ID`.
+`/projects/:id` redirects there; no separate information component is needed.
+The Projects heading's plus opens registration; per-project menus offer Edit, Pin/Unpin
+and Delete with icons. The project heading's Edit uses the same dialog. Environment
+creation is in the table toolbar. Pinning is a shared optional `pinned` field,
+ordered first only in the sidebar. Project deletion uses the existing preview and
+confirmation flow and is rejected by Core while environment registrations remain.
+Names are shared through Core's optional `display_name`; missing names fall back to
+the stable ID. Sidebar and Overview labels add the ID when names repeat, using
+the shared collision rule in `src/lib/projects.ts`. `project.rename`, `project.pin`
+and confirmed `project.delete` are ordinary writes with the same refresh and
+error lifecycle as registration. Conflict responses carry `details.existing_project`
+for navigation, without parsing human-readable error messages.
+Project names are links, chevrons toggle the tree, and overflow results
+use Show all. Normal rows omit the redundant worktree type; unavailable directories
+keep a short status. Optional form configuration and secret usage/storage guidance
+use native disclosures. Follow the [shared terminology](../../docs/management.md#terminology):
+an Environment is the taskenv registration and a worktree is the Git directory.
 
 The shadcn dialog keeps Radix focus trapping and portals, with a static overlay
 and CSS scroll lock instead of Radix's injected scroll-lock stylesheet. This

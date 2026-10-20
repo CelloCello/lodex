@@ -1,7 +1,7 @@
 # Local console
 
 The Console is Lodex's optional browser interface for the task environments you
-use with a coding agent. Inspect checkouts, command results and service logs after
+use with a coding agent. Inspect environments, command results and service logs after
 your agent uses the CLI, or operate those same environments yourself. The Console
 shares the CLI's management database and Python core; history retrieval uses the
 CLI or MCP. Both workflows are available without the Console.
@@ -20,7 +20,7 @@ to an existing CLI installation):
 
 ```bash
 cd /absolute/path/to/lodex
-uv tool install --force --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 ```
 
 After installation, start the console from any directory:
@@ -49,10 +49,66 @@ below for in-progress commands.
 
 ## Navigate and operate
 
-Environments is the default page. Search by branch, project, path or ID, and filter
-by project or status. Projects provides repository registration, configuration
-sources, worktree creation and attaching existing checkouts. Registration does
-not implicitly create, prepare or start an environment.
+Overview is the default page. It shows current service counts by project,
+environments needing attention, and worktree availability. Service states and
+command outcomes remain separate: a running environment can also need attention.
+Attention includes unavailable worktrees, invalid configuration, failed/unknown
+services, and a latest command with a failed, interrupted or unknown outcome.
+Charts count recorded services, including stopped, transitional, unknown and legacy
+external records; they do not infer unrecorded services or historical trends.
+When project names repeat, Overview's Services, Activity and Projects include the
+fixed project ID beside each name. Unique names stay concise, and unnamed projects
+continue to show their ID. The sidebar uses the same rule to distinguish names.
+
+The sidebar keeps Overview, the project/environment tree and shared Secrets available
+on every page. Open an environment directly from its project. Each expanded project
+previews up to six entries, prioritizing the main worktree, selected environment,
+attention, and running services. Search covers all registered paths, branches,
+project IDs and environment IDs, including entries outside that preview. Show all
+opens the complete searchable/filterable list, with eight entries per page and
+pagination preserved in the URL. Unreadable branches fall back to a readable
+directory name or an unavailable-worktree label; the stable ID remains in details.
+
+The plus beside **Projects** opens **Add project**. Enter the repository's absolute
+**Path**; **Name** is suggested from its directory and can be edited. **Options**
+contains the suggested fixed **Project ID** and optional configuration source.
+The suggested ID avoids IDs already in the current list; server validation remains
+authoritative. Duplicate registration identifies the existing project and offers
+an **Open** action. Repeating registration does not rename an existing project.
+
+Each project's plus button opens **Add environment**, offering **New worktree**
+or **Use existing**. The latter registers an environment for an existing
+main or linked Git worktree from the same local repository, without copying code.
+Registration does not implicitly prepare or start an environment.
+
+Click a project name to open its environment list; the chevron only expands or
+collapses the sidebar tree. The page combines the list with its source worktree
+path and **Details**, which reveals the configuration source. There is no separate
+information page. The project's menu offers **Edit** with a pencil icon, which updates the
+shared display name without changing the ID, environment relationships or paths.
+The same **Edit** action appears beside the project heading. **+ Environment**
+sits at the right of the table's filter toolbar, separate from project actions.
+**Pin** moves a project to the top of the sidebar; **Unpin** restores normal order.
+Pins are saved in the shared project record and survive reloads. **Delete** previews
+and confirms removal of an empty project registration. Projects with any registered
+environment, including unavailable worktrees, must have those registrations removed
+first. The Core checks this again when confirming; repository, worktrees and files remain.
+Names and IDs are both searchable. Show all appears when the tree has
+more than six results. Source information remains read-only.
+
+Project pages use `/environments?project=PROJECT_ID`; older `/projects/PROJECT_ID`
+links redirect there. Labels omit context already supplied by the page: the tree
+heading is **Projects**, and **+ Environment** in an environment list opens
+**Add environment**. Breadcrumbs show the project and environment directly,
+without an intermediate Environments level.
+Optional form settings are under **Options**. Full definitions remain in the
+terminology reference rather than being repeated beside every control.
+
+The [shared terminology](management.md#terminology) distinguishes **Environment**
+(Lodex's taskenv registration), **worktree** (the Git directory) and environment
+variables. Creating or attaching a worktree adds an environment. **Remove worktree**
+deletes the owned directory while retaining the record; **Unregister**
+removes the registration while retaining files and services.
 
 Open an environment for Services, Operations, Configuration, Resources, and
 Cleanup & removal. Services keeps process state, URLs, start/stop and logs together;
@@ -70,7 +126,7 @@ reloads using browser local storage for that origin (scheme, host and port).
 Reuse `--port 8765` and the same host to retain the choice across server restarts;
 a different origin starts with System unless it already has a saved preference.
 When storage is unavailable, switching still works for the current page.
-`Checkout available` means the directory is present, not that preparation or
+`Available` means the directory is present, not that preparation or
 service startup succeeded. The current branch and commit are observed at inspection
 time; they do not determine taskenv identity. Missing or invalid configuration is
 shown without hiding previously recorded services or resources.
@@ -85,6 +141,9 @@ The Secrets page operates independently of projects. Values are sent in request
 bodies, cleared from the form after submission and never returned. The local
 management SQLite database stores values in plaintext under private permissions;
 updating a shared name affects the next command/start/export, not running processes.
+**Replace** selects the stored name and focuses an empty input, without reading
+its stored value. Each reference can expand to a TOML example distinguishing the
+application's environment variable name from the shared storage name.
 
 Closing a tab does not stop services or replay a submitted action. Reopening it
 queries recorded results. Commands execute in a separate foreground worker so
@@ -95,10 +154,11 @@ a worker still finishing: inspect before explicitly retrying. There is no durabl
 queue, automatic continuation or automatic retry. Managed long services are
 independent of the console and remain accessible through a new CLI caller.
 
-Remove first shows the checkout path, Git status, services and known resources.
-Removal retains the registry record for inspection; forget it separately when no
-longer needed. Force removal is a separate unchecked choice; Git and external/main-checkout
-protections remain in the core. Forget removes registration without deleting
+Remove first shows the worktree path, Git status, services and known resources.
+Removal retains the registry record for inspection; use **Unregister** separately
+when no longer needed. Force removal is a separate unchecked choice. Core retains
+Git protections and prevents removal of attached or main worktrees.
+Unregister removes registration without deleting
 services, resources or shared secrets. Cleanup executes the repository's command
 and does not implicitly stop services or delete a worktree.
 
@@ -114,13 +174,13 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --force --reinstall --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --reinstall --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 ```
 
 Keep `--reinstall` when rebuilding the same package version so the dependency
 packages, including Console Server, are reinstalled too. Stop the old console
 process with Ctrl+C, start `lodex console --port 8765` again, then open its new
-token URL. These wheel names match the current 0.2.0 release; use the corresponding
+token URL. These wheel names match the current 0.3.0 release; use the corresponding
 filename when the package version changes.
 
 ## Development and distribution

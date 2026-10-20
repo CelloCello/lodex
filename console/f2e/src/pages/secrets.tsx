@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { KeyRound, Plus, Trash2 } from "lucide-react";
 import { useConsole } from "@/lib/console";
 import { Button } from "@/components/ui/button";
@@ -20,21 +20,18 @@ import {
 export function Secrets() {
   const { data, loading, busy, perform } = useConsole();
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [storedName, setStoredName] = useState("");
+  const valueInput = useRef<HTMLInputElement>(null);
   return (
     <>
-      <PageHeading
-        title="Secrets"
-        description="Shared values, available to every project by name."
-      />
+      <PageHeading title="Secrets" description="Shared across projects." />
       <section className="form-section">
         <div>
           <h2>
             <KeyRound size={18} />
-            Add or update a secret
+            Set value
           </h2>
-          <p className="muted">
-            Saving an existing name replaces its value for all references.
-          </p>
+          <p className="muted">Saved values cannot be read back.</p>
         </div>
         <form
           className="inline-form"
@@ -45,13 +42,16 @@ export function Secrets() {
             const name = String(fields.get("name"));
             const value = String(fields.get("value"));
             form.reset();
+            setStoredName("");
             void perform({ action: "secret.set", name, value }, "Save secret");
           }}
         >
           <label>
-            Stored name
+            Name
             <Input
               name="name"
+              value={storedName}
+              onChange={(event) => setStoredName(event.target.value)}
               required
               placeholder="app-dev-token"
               autoComplete="off"
@@ -61,6 +61,7 @@ export function Secrets() {
             Value
             <Input
               name="value"
+              ref={valueInput}
               type="password"
               required
               autoComplete="new-password"
@@ -68,14 +69,19 @@ export function Secrets() {
           </label>
           <Button disabled={!!busy}>
             <Plus />
-            Save secret
+            Save
           </Button>
         </form>
         <p className="muted small">
-          Values are stored in plaintext in the local SQLite database under
-          private file permissions and are never returned here. Running services
-          keep their current values until restarted.
+          Running services keep their current values until restarted.
         </p>
+        <details className="form-options">
+          <summary>Storage</summary>
+          <p className="muted small">
+            Values are stored in the local SQLite database in plaintext, with
+            private file permissions. They are never returned here.
+          </p>
+        </details>
       </section>
       {loading ? (
         <Loading />
@@ -85,11 +91,11 @@ export function Secrets() {
         </Empty>
       ) : (
         <div className="data-panel">
-          <Table>
+          <Table className="secret-table">
             <TableHeader>
               <TableRow>
-                <TableHead>Stored name</TableHead>
-                <TableHead>Configuration reference</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Reference</TableHead>
                 <TableHead>
                   <span className="sr-only">Actions</span>
                 </TableHead>
@@ -98,11 +104,34 @@ export function Secrets() {
             <TableBody>
               {data.secrets.map((name) => (
                 <TableRow key={name}>
-                  <TableCell className="font-medium">{name}</TableCell>
+                  <TableCell>
+                    <strong>{name}</strong>
+                  </TableCell>
                   <TableCell>
                     <code>secret:{name}</code>
+                    <details className="secret-reference">
+                      <summary>Usage</summary>
+                      <pre>{`[secrets]\nAPI_TOKEN = ${JSON.stringify(`secret:${name}`)}`}</pre>
+                      <p className="muted small">
+                        Add this to <code>.lodex/project.toml</code>. API_TOKEN
+                        is the variable your app receives.
+                      </p>
+                    </details>
                   </TableCell>
                   <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      disabled={!!busy}
+                      onClick={() => {
+                        setStoredName(name);
+                        if (valueInput.current) {
+                          valueInput.current.value = "";
+                          valueInput.current.focus();
+                        }
+                      }}
+                    >
+                      Replace<span className="sr-only"> {name}</span>
+                    </Button>
                     <Button
                       variant="ghost"
                       className="text-destructive"

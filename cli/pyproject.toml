@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lodex"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local toolkit for developers working with coding agents"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
-  "lodex-core==0.2.0",
+  "lodex-core==0.3.0",
   "anyio>=4.5,<5",
   "mcp>=1.28,<2",
   "pydantic>=2.11,<3",
@@ -22,7 +22,7 @@ dependencies = [
 lodex = "lodex_cli.main:main"
 
 [project.optional-dependencies]
-console = ["lodex-console==0.2.0"]
+console = ["lodex-console==0.3.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lodex_cli"]

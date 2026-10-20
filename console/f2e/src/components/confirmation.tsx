@@ -16,10 +16,12 @@ export function ConfirmationDialog({
   confirmation,
   onClose,
   onDone,
+  onCloseAutoFocus,
 }: {
   confirmation: Confirmation | null;
   onClose: () => void;
   onDone?: () => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const { perform, busy, error } = useConsole();
   const [force, setForce] = useState(false);
@@ -34,10 +36,12 @@ export function ConfirmationDialog({
     action?.action === "cleanup"
       ? "Run cleanup"
       : action?.action === "secret.remove"
-        ? "Remove shared secret"
-        : removing
-          ? "Remove worktree"
-          : "Forget registration";
+        ? "Remove secret"
+        : action?.action === "project.delete"
+          ? "Delete project"
+          : removing
+            ? "Remove worktree"
+            : "Unregister environment";
   return (
     <Dialog
       open={!!confirmation}
@@ -54,6 +58,8 @@ export function ConfirmationDialog({
           returnFocus.current = document.activeElement as HTMLElement;
         }}
         onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          if (event.defaultPrevented) return;
           if (returnFocus.current?.isConnected) {
             event.preventDefault();
             returnFocus.current.focus();
@@ -63,13 +69,24 @@ export function ConfirmationDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            Review the affected scope before continuing.
+            Review the scope before continuing.
           </DialogDescription>
         </DialogHeader>
         <div className="confirmation-scope">
+          {action?.action === "project.delete" && (
+            <div>
+              <strong>{String(preview.display_name)}</strong>
+              <p className="muted small">
+                Project ID <code>{String(preview.project)}</code>
+              </p>
+              <code className="break-value">
+                {String(preview.source_checkout)}
+              </code>
+            </div>
+          )}
           {preview.path != null && (
             <div>
-              <span className="field-title">Checkout path</span>
+              <span className="field-title">Worktree path</span>
               <code className="break-value">{String(preview.path)}</code>
             </div>
           )}
@@ -185,7 +202,8 @@ export function ConfirmationDialog({
               }
             }}
           >
-            {busy || title}
+            {busy ||
+              (action?.action === "worktree.forget" ? "Unregister" : title)}
           </Button>
         </div>
       </DialogContent>

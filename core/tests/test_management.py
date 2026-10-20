@@ -86,15 +86,17 @@ def test_create_attach_identity_and_merge(registry: Registry, repo: Path) -> Non
     worktrees.git(Path(a["path"]), "commit", "-qm", "change")
     worktrees.git(repo, "merge", "--ff-only", "feature-a")
     assert (repo / "change.txt").exists()
-    with pytest.raises(ManagementError, match="external or main"):
+    with pytest.raises(ManagementError) as blocked:
         worktrees.remove(registry, main, yes=True, force=True)
+    assert blocked.value.code == "protected_checkout"
     external = repo.parent / "detached"
     worktrees.git(repo, "worktree", "add", "--detach", str(external), "initial")
     detached = worktrees.attach(registry, "fixture", external)
     assert not detached["owned"]
     assert worktrees.git(external, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
-    with pytest.raises(ManagementError, match="external or main"):
+    with pytest.raises(ManagementError) as blocked:
         worktrees.remove(registry, detached, yes=True, force=True)
+    assert blocked.value.code == "protected_checkout"
 
 
 @pytest.mark.parametrize("length", [56, 57, 64])
@@ -117,8 +119,9 @@ def test_same_remote_different_clone_and_replacement(registry: Registry, repo: P
     worktrees.git(repo.parent, "clone", str(repo), str(clone))
     worktrees.git(clone, "remote", "set-url", "origin", "https://example.invalid/shared.git")
     worktrees.project_add(registry, "clone", clone, repo / project_config.CONFIG)
-    with pytest.raises(ManagementError, match="different local"):
+    with pytest.raises(ManagementError) as wrong_repository:
         worktrees.attach(registry, "fixture", clone)
+    assert wrong_repository.value.code == "wrong_repository"
     repo.rename(repo.with_name("moved"))
     assert worktrees.inspect(registry, original)["state"] == "missing"
     worktrees.git(clone.parent, "clone", str(clone), str(repo))

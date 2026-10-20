@@ -10,6 +10,42 @@ from lodex_core.management import project_config, worktrees
 from lodex_core.management.store import Registry
 
 
+def test_project_display_name_uses_fixed_cli_id(
+    registry: Registry,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("LODEX_HOME", str(registry.root))
+    assert (
+        cli.main(
+            ["project", "add", "stable-id", str(repo), "--display-name", "First name", "--json"]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["result"]["display_name"] == "First name"
+    assert cli.main(["project", "rename", "stable-id", "新的名稱", "--json"]) == 0
+    renamed = json.loads(capsys.readouterr().out)["result"]
+    assert renamed["id"] == "stable-id" and renamed["display_name"] == "新的名稱"
+    assert cli.main(["project", "list", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["result"] == [renamed]
+    assert cli.main(["project", "add", "another-id", str(repo), "--json"]) == 1
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error["code"] == "already_registered"
+    assert error["details"] == {"existing_project": "stable-id"}
+    assert "新的名稱" in error["message"]
+    assert cli.main(["project", "pin", "stable-id", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["result"]["pinned"] is True
+    assert cli.main(["project", "pin", "stable-id", "--unpin", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["result"]["pinned"] is False
+    assert cli.main(["project", "delete", "stable-id", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["result"]["removed"] is False
+    assert registry.get("project", "stable-id")["display_name"] == "新的名稱"
+    assert cli.main(["project", "delete", "stable-id", "--yes", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["result"]["removed"] is True
+    assert repo.exists() and registry.all("project") == []
+
+
 def test_project_add_initializes_reports_and_preserves_edits(
     registry: Registry,
     repo: Path,

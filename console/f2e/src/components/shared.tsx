@@ -13,16 +13,22 @@ import {
 import type { Task } from "@/api";
 
 export function taskLabel(task: Task) {
-  return (
-    task.branch || (task.state === "present" ? "Detached checkout" : task.id)
-  );
+  if (task.branch) return task.branch;
+  if (task.state === "present" && task.head && !task.git_error)
+    return "Detached HEAD";
+  const directory = task.path.replace(/\/+$/, "").split("/").pop();
+  return directory && !/^[a-f0-9]{16}$/i.test(directory)
+    ? directory
+    : task.state === "present"
+      ? "Unknown branch"
+      : "Unavailable worktree";
 }
 export function State({
   value,
-  checkout = false,
+  worktree = false,
 }: {
   value: string;
-  checkout?: boolean;
+  worktree?: boolean;
 }) {
   const tone = ["running", "succeeded"].includes(value)
     ? "success"
@@ -34,7 +40,7 @@ export function State({
   return (
     <Badge variant="outline" className={`state state-${tone}`}>
       <span className="state-dot" aria-hidden="true" />
-      {checkout && value === "present" ? "Checkout available" : value}
+      {worktree && value === "present" ? "Available" : value}
     </Badge>
   );
 }
@@ -44,14 +50,14 @@ export function PageHeading({
   children,
 }: {
   title: string;
-  description: string;
+  description?: string;
   children?: ReactNode;
 }) {
   return (
     <div className="page-heading">
       <div>
         <h1>{title}</h1>
-        <p className="muted">{description}</p>
+        {description && <p className="muted">{description}</p>}
       </div>
       <div className="actions">{children}</div>
     </div>

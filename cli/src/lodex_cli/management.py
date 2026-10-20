@@ -55,11 +55,29 @@ def resolve(store: Registry, target: str | None) -> dict[str, Any]:
 
 @project_app.command("add")
 def project_add(
-    ctx: typer.Context, name: str, path: Path, config: Config = None, as_json: Json = False
+    ctx: typer.Context,
+    name: str,
+    path: Path,
+    config: Config = None,
+    as_json: Json = False,
+    display_name: Annotated[
+        str | None, typer.Option(help="Display name; the positional NAME is the fixed project ID.")
+    ] = None,
 ) -> int:
     """Register a repository and initialize missing configuration."""
     with registry() as store:
-        return management_result(ctx, worktrees.project_add(store, name, path, config), as_json)
+        return management_result(
+            ctx,
+            worktrees.project_add(store, name, path, config, project_name=display_name),
+            as_json,
+        )
+
+
+@project_app.command("rename")
+def project_rename(ctx: typer.Context, project: str, name: str, as_json: Json = False) -> int:
+    """Change a project's display name; its ID and worktrees stay fixed."""
+    with registry() as store:
+        return management_result(ctx, worktrees.project_update(store, project, name), as_json)
 
 
 @project_app.command("list")
@@ -69,6 +87,29 @@ def project_list(ctx: typer.Context, as_json: Json = False) -> int:
         return management_result(ctx, [], as_json)
     with registry(read_only=True) as store:
         return management_result(ctx, store.all("project"), as_json)
+
+
+@project_app.command("pin")
+def project_pin(
+    ctx: typer.Context,
+    project: str,
+    unpin: Annotated[bool, typer.Option(help="Remove the pin.")] = False,
+    as_json: Json = False,
+) -> int:
+    """Pin a project to the top of Console navigation."""
+    with registry() as store:
+        return management_result(
+            ctx, worktrees.project_pin(store, project, pinned=not unpin), as_json
+        )
+
+
+@project_app.command("delete")
+def project_delete(
+    ctx: typer.Context, project: str, yes: Yes = False, as_json: Json = False
+) -> int:
+    """Preview or delete an empty project registration; keep all files."""
+    with registry() as store:
+        return management_result(ctx, worktrees.project_delete(store, project, yes=yes), as_json)
 
 
 @worktree_app.command("create")

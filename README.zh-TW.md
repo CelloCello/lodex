@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>配合 coding agent 使用的本機開發工具。</strong><br />
-  準備工作環境、執行專案、找回先前的開發脈絡。
+  準備任務環境、執行專案、找回先前的開發脈絡。
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-20332f?style=flat-square" alt="授權：Apache 2.0" /></a>
-  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.2.0-20332f?style=flat-square" alt="版本 0.2.0" /></a>
+  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.3.0-20332f?style=flat-square" alt="版本 0.3.0" /></a>
   <a href="#安裝"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11 以上" /></a>
   <a href="docs/history.md#connect-codex-through-mcp"><img src="https://img.shields.io/badge/MCP-read--only_history-626b68?style=flat-square" alt="MCP：唯讀歷史查詢" /></a>
 </p>
@@ -32,7 +32,7 @@
 Lodex 是一套配合 coding agent 使用的本機工具，協助你與 agent 為任務準備工作目錄、
 執行專案命令與服務，並從過去的 agent 對話中找回有用的脈絡。
 
-- **準備工作環境**：註冊 Git 儲存庫、建立或掛接 worktree，為各個工作目錄配置獨立的設定與連接埠。
+- **準備任務環境**：註冊 Git 儲存庫、建立或掛接 worktree，為各個工作目錄配置獨立的設定與連接埠。
 - **執行並查看專案狀態**：執行儲存庫定義的準備與驗證命令、啟動或停止服務，並查看結果與日誌。
 - **找回先前的脈絡**：搜尋 coding agent 的歷史對話，查找決策、先前嘗試與佐證。
   目前內建的歷史來源介接器支援讀取 Codex sessions。
@@ -81,7 +81,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --find-links dist dist/lodex-0.2.0-py3-none-any.whl
+uv tool install --find-links dist dist/lodex-0.3.0-py3-none-any.whl
 lodex --version
 lodex --help
 ```
@@ -93,7 +93,7 @@ lodex --help
 安裝後即可在任意目錄啟動：
 
 ```bash
-uv tool install --force --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 lodex console --port 8765
 ```
 
@@ -110,8 +110,14 @@ Console 與 CLI 共用管理狀態，並內附建置好的前端資源，一般�
 
 ### 管理本機任務環境
 
-專案是已註冊的本機 Git 儲存庫。任務環境則將一份工作目錄與設定、配置的連接埠、
-命令紀錄及服務關聯起來。註冊專案時，不會自動掛接它現有的工作目錄。
+專案是已註冊的本機 Git 儲存庫。任務環境（Console 稱 Environment，內部名稱為 `taskenv`）
+將一份 Git worktree 與設定、配置的連接埠、命令紀錄及服務關聯起來。
+Worktree 是實際的 Git 工作目錄，包含主工作目錄與額外建立的 linked worktree；
+目錄移除後，任務環境紀錄仍可保留。註冊專案時，不會自動為主工作目錄註冊任務環境。
+完整定義見[用語對照](docs/management.md#terminology)。
+專案可設定顯示名稱（`project add … --display-name TEXT`、`project rename ID NAME`）；
+修改名稱不會變更 CLI 使用的固定 ID、既有環境關聯或 worktree 路徑。
+舊專案未設定名稱時，繼續顯示 ID。
 
 `project add` 會驗證並保留既有的 `.lodex/project.toml`；若檔案不存在，
 則建立最小設定骨架，或複製 `--config PATH` 指定的設定檔。
@@ -316,7 +322,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --force --reinstall --find-links dist dist/lodex-0.2.0-py3-none-any.whl
+uv tool install --force --reinstall --find-links dist dist/lodex-0.3.0-py3-none-any.whl
 lodex skill install lodex-history --dry-run
 lodex skill install lodex-history
 ```
@@ -324,7 +330,7 @@ lodex skill install lodex-history
 若已安裝 Console，請將上面的 `uv tool install` 命令替換為：
 
 ```bash
-uv tool install --force --reinstall --find-links dist 'dist/lodex-0.2.0-py3-none-any.whl[console]'
+uv tool install --force --reinstall --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
 ```
 
 已安裝的 Console 會提供 Server wheel 內附的前端資源。

@@ -173,7 +173,7 @@ test("failed queries wait for polling or explicit refresh and errors can be dism
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect.poll(() => reads).toBe(3);
   await expect(
-    page.getByRole("heading", { name: "Connect your first environment" }),
+    page.getByRole("heading", { name: "No projects yet" }),
   ).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
@@ -206,11 +206,13 @@ test("switching targets cancels an old detail request and keeps the new target i
     request.url().endsWith("/api/task/target-a"),
   );
   await page
-    .getByRole("navigation")
-    .getByRole("link", { name: /^Environments/ })
+    .locator(".sidebar")
+    .getByRole("link", {
+      name: "Open target-b in query-fixture",
+      exact: true,
+    })
     .click();
   await canceled;
-  await page.getByRole("link", { name: "target-b", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "target-b", exact: true }),
   ).toBeVisible();
@@ -259,12 +261,10 @@ test("forgetting an environment does not report its removed detail as a query fa
     });
   });
   await page.goto("/#/environments/forget-query/cleanup");
-  await page
-    .getByRole("button", { name: "Forget registration", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Unregister", exact: true }).click();
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: "Forget registration", exact: true })
+    .getByRole("button", { name: "Unregister", exact: true })
     .click();
   await expect(
     page.getByRole("heading", { name: "Environments", exact: true }),
@@ -302,20 +302,24 @@ test("detail query errors follow the selected target and clear after recovery", 
   await page.goto("/#/environments/error-target/services");
   await expect(page.getByRole("alert")).toContainText("Detail unavailable");
   await page
-    .getByRole("navigation")
-    .getByRole("link", { name: /^Environments/ })
+    .locator(".sidebar")
+    .getByRole("link", {
+      name: "Open healthy-target in query-fixture",
+      exact: true,
+    })
     .click();
-  await page.getByRole("link", { name: "healthy-target", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "healthy-target", exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await page
-    .getByRole("navigation")
-    .getByRole("link", { name: /^Environments/ })
-    .click();
   failing = false;
-  await page.getByRole("link", { name: "error-target", exact: true }).click();
+  await page
+    .locator(".sidebar")
+    .getByRole("link", {
+      name: "Open error-target in query-fixture",
+      exact: true,
+    })
+    .click();
   await expect(
     page.getByRole("heading", { name: "error-target", exact: true }),
   ).toBeVisible();
@@ -457,18 +461,18 @@ test("secret failures clear input and remain explicit across polling and reconne
     });
   });
   await page.goto("/#/secrets");
-  await page.getByLabel("Stored name").fill("test-secret");
+  await page.getByLabel("Name").fill("test-secret");
   await page
     .getByLabel("Value", { exact: true })
     .fill("synthetic-private-value");
   await page.evaluate(() => window.dispatchEvent(new Event("offline")));
-  await page.getByRole("button", { name: "Save secret" }).click();
+  await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByRole("alert")).toContainText("Secret save failed");
   await expect(page.getByLabel("Value", { exact: true })).toBeEmpty();
   await expect(page.locator("body")).not.toContainText(
     "synthetic-private-value",
   );
-  await expect(page.getByRole("button", { name: "Save secret" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
   await page.clock.runFor(10000);
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await page.reload();
@@ -550,11 +554,11 @@ test("a mutation finishing after navigation refreshes the selected environment",
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect.poll(() => !!pendingWrite).toBe(true);
   await page
-    .getByRole("navigation")
-    .getByRole("link", { name: /^Environments/ })
-    .click();
-  await page
-    .getByRole("link", { name: "write-destination", exact: true })
+    .locator(".sidebar")
+    .getByRole("link", {
+      name: "Open write-destination in query-fixture",
+      exact: true,
+    })
     .click();
   await expect(
     page.getByRole("heading", { name: "write-destination", exact: true }),

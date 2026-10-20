@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import type { Action, Detail } from "@/api";
 import { useConsole } from "@/lib/console";
+import { worktreeKind } from "@/lib/environments";
+import { projectLabel } from "@/lib/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -75,7 +77,7 @@ export function EnvironmentDetail() {
 }
 
 function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
-  const { busy, perform } = useConsole();
+  const { data, busy, perform } = useConsole();
   const navigate = useNavigate();
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [logs, setLogs] = useState<{
@@ -133,7 +135,7 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
         to={`/environments?project=${encodeURIComponent(detail.project)}`}
       >
         <ArrowLeft size={14} />
-        {detail.project} environments
+        {projectLabel(data.projects, detail.project)} environments
       </Link>
       <div className="detail-heading">
         <div>
@@ -142,20 +144,14 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
             <h1>{taskLabel(detail)}</h1>
           </div>
           <div className="detail-meta">
-            <State value={detail.state} checkout />
-            <span>
-              {detail.main
-                ? "Main checkout"
-                : detail.owned
-                  ? "Managed worktree"
-                  : "Attached checkout"}
-            </span>
+            <State value={detail.state} worktree />
+            <span>{worktreeKind(detail)}</span>
             <code>ID {detail.id}</code>
           </div>
         </div>
       </div>
       <div className="checkout-path">
-        <span className="muted">Checkout</span>
+        <span className="muted">Path</span>
         <code>{detail.path}</code>
       </div>
       {detail.configuration_error && (
@@ -195,11 +191,7 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
               <h2>
                 Services <span className="muted">{services.length}</span>
               </h2>
-              <p className="muted">
-                Start, inspect and stop this environment’s processes.
-              </p>
             </div>
-            <span className="small muted">Observed every 3 seconds</span>
           </div>
           {!services.length ? (
             <Empty
@@ -266,7 +258,7 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
                           disabled={!canStart}
                           title={
                             !canStart
-                              ? "Requires a valid configuration, available checkout and resolved service state"
+                              ? "Requires a valid configuration, available worktree and resolved service state"
                               : undefined
                           }
                           onClick={() =>
@@ -330,11 +322,7 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
         <TabsContent value="operations">
           <div className="section-heading">
             <div>
-              <h2>Repository commands</h2>
-              <p className="muted">
-                Run the commands configured in this checkout. Cleanup has its
-                own section.
-              </p>
+              <h2>Commands</h2>
             </div>
           </div>
           <div className="command-bar">
@@ -353,17 +341,14 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
               ))}
             {!detail.commands?.some((n) => n !== "cleanup") && (
               <p className="muted">
-                No runnable commands available. Check this checkout’s
+                No runnable commands available. Check this worktree’s
                 configuration.
               </p>
             )}
           </div>
           <div className="section-heading">
             <div>
-              <h2>Execution history</h2>
-              <p className="muted">
-                Recorded outcomes across the CLI and console.
-              </p>
+              <h2>History</h2>
             </div>
           </div>
           {!operations.length ? (
@@ -436,11 +421,8 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
         <TabsContent value="resources">
           <div className="section-heading">
             <div>
-              <h2>Known resources</h2>
-              <p className="muted">
-                Repository-reported observations, not a complete resource
-                inventory.
-              </p>
+              <h2>Reported resources</h2>
+              <p className="muted">Reported by commands; may be incomplete.</p>
             </div>
           </div>
           {!detail.known_resources.length ? (
@@ -488,18 +470,15 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
           <div className="section-heading">
             <div>
               <h2>Cleanup and removal</h2>
-              <p className="muted">
-                These are separate actions. Review the scope before each one.
-              </p>
             </div>
           </div>
           <div className="danger-list">
             <div>
               <div>
-                <h3>Run repository cleanup</h3>
+                <h3>Cleanup</h3>
                 <p className="muted">
-                  Executes the repo’s cleanup command. It does not automatically
-                  stop services or delete the worktree.
+                  Runs the repository's cleanup command; services and worktree
+                  remain.
                 </p>
                 {!detail.cleanup.available && (
                   <p className="small muted">
@@ -535,15 +514,14 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
               <div>
                 <h3>Remove worktree</h3>
                 <p className="muted">
-                  Deletes a Lodex-managed checkout, including ignored files. The
-                  Git branch and registry record are retained.
+                  Deletes this directory, including ignored files. Keeps the
+                  branch and registration.
                 </p>
                 {(!detail.owned ||
                   detail.main ||
                   detail.state !== "present") && (
                   <p className="small muted">
-                    Removal requires an available, Lodex-managed worktree. Main
-                    and attached checkouts cannot be removed.
+                    The worktree must be available and created by Lodex.
                   </p>
                 )}
               </div>
@@ -566,10 +544,10 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
             </div>
             <div>
               <div>
-                <h3>Forget registration</h3>
+                <h3>Unregister</h3>
                 <p className="muted">
-                  Removes the registry entry. Files, services, external
-                  resources and shared secrets remain.
+                  Removes the registration. Files, services and resources
+                  remain.
                 </p>
               </div>
               <Button
@@ -580,7 +558,7 @@ function DetailContent({ detail, tab }: { detail: Detail; tab: string }) {
                 }
               >
                 <Unlink />
-                Forget registration
+                Unregister
               </Button>
             </div>
           </div>
@@ -643,11 +621,7 @@ function Configuration({ detail }: { detail: Detail }) {
     <>
       <div className="section-heading">
         <div>
-          <h2>Configuration</h2>
-          <p className="muted">
-            Edit this checkout’s TOML. Each new operation reads the file
-            directly.
-          </p>
+          <p className="muted">Edit the local file to change settings.</p>
         </div>
       </div>
       <dl className="configuration-paths">
@@ -668,11 +642,8 @@ function Configuration({ detail }: { detail: Detail }) {
         <>
           <div className="section-heading">
             <div>
-              <h2>Resolved environment</h2>
-              <p className="muted">
-                Allocated values and current configuration. Secret values are
-                excluded.
-              </p>
+              <h2>Variables</h2>
+              <p className="muted">Secret values are excluded.</p>
             </div>
             <Button
               variant="outline"
@@ -714,10 +685,10 @@ function Configuration({ detail }: { detail: Detail }) {
             <p className="muted">No secret references configured.</p>
           )}
           <section className="form-section mt-8">
-            <h2>Port allocation</h2>
+            <h2>Ports</h2>
             <p className="muted">
-              Update a port key declared in project.toml. This does not restart
-              running services.
+              Changes apply on the next start; running services keep their
+              current ports.
             </p>
             <form
               className="inline-form"
