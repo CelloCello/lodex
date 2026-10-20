@@ -52,7 +52,7 @@ function completedNotice(
   return config
     ? `${label} completed. Configuration ${config.method}: ${config.path}. ${typeof result.next_step === "string" ? result.next_step : ""}`
     : action.action === "worktree.remove"
-      ? `${label} completed. The registry record is retained for inspection. Use Forget registration to remove it.`
+      ? `${label} completed. The registry record is retained for inspection. Use Unregister environment to remove it.`
       : `${label} completed.`;
 }
 

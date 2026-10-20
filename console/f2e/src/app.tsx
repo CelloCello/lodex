@@ -41,13 +41,24 @@ export function App() {
   const { theme, changeTheme } = useTheme();
   const location = useLocation();
   const target = matchPath("/environments/:id/*", location.pathname)?.params.id;
+  const projectTarget = matchPath("/projects/:id", location.pathname)?.params
+    .id;
+  const selectedProject =
+    projectTarget ||
+    (location.pathname === "/environments"
+      ? new URLSearchParams(location.search).get("project") || undefined
+      : undefined);
   const state = useConsoleState(target);
   const [menu, setMenu] = useState(false);
   const [form, setForm] = useState<{
     kind: "add" | "project";
     project?: string;
   } | null>(null);
-  const projectNavigation = useProjectNavigation(state.data, target);
+  const projectNavigation = useProjectNavigation(
+    state.data,
+    target,
+    selectedProject,
+  );
   const main = useRef<HTMLElement>(null);
   const mobileMenu = useRef<HTMLButtonElement>(null);
   const formTrigger = useRef<HTMLElement | null>(null);
@@ -63,16 +74,20 @@ export function App() {
   }, [location.pathname]);
   useEffect(() => {
     main.current?.focus({ preventScroll: true });
-  }, [section, target]);
+  }, [section, target, projectTarget]);
   useEffect(() => {
-    document.title = `${target && state.detail?.id === target ? taskLabel(state.detail) : section} · Lodex`;
+    document.title = `${selectedProject || (target && state.detail?.id === target ? taskLabel(state.detail) : section)} · Lodex`;
   }, [
     section,
     target,
+    projectTarget,
+    selectedProject,
     state.detail?.branch,
     state.detail?.id,
     state.detail?.path,
     state.detail?.state,
+    state.detail?.head,
+    state.detail?.git_error,
   ]);
   const navigation = (
     <ProjectNavigation
@@ -80,7 +95,12 @@ export function App() {
       target={target}
       navigation={projectNavigation}
       busy={!!state.busy}
-      onNavigate={() => setMenu(false)}
+      onNavigate={() => {
+        setMenu(false);
+        requestAnimationFrame(() =>
+          main.current?.focus({ preventScroll: true }),
+        );
+      }}
       onAdd={(project, trigger) => {
         formTrigger.current = menu ? mobileMenu.current : trigger;
         setMenu(false);
@@ -134,18 +154,19 @@ export function App() {
               </Button>
               <Monitor size={15} className="muted desktop-icon" />
               <ChevronRight size={13} className="muted desktop-icon" />
-              <Link
-                to={
-                  section === "Overview"
-                    ? "/dashboard"
-                    : `/${section.toLowerCase()}`
-                }
-              >
-                {section}
-              </Link>
+              {!target && !selectedProject && (
+                <Link
+                  to={
+                    section === "Overview"
+                      ? "/dashboard"
+                      : `/${section.toLowerCase()}`
+                  }
+                >
+                  {section}
+                </Link>
+              )}
               {target && state.detail && (
                 <>
-                  <ChevronRight size={13} className="muted" />
                   <Link
                     className="breadcrumb-project"
                     to={`/environments?project=${encodeURIComponent(state.detail.project)}`}
@@ -154,9 +175,14 @@ export function App() {
                   </Link>
                 </>
               )}
+              {selectedProject && !target && (
+                <>
+                  <span className="breadcrumb-current">{selectedProject}</span>
+                </>
+              )}
               {target && (
                 <>
-                  <ChevronRight size={13} className="muted" />
+                  {state.detail && <ChevronRight size={13} className="muted" />}
                   <span className="breadcrumb-current">
                     {state.detail ? taskLabel(state.detail) : "Environment"}
                   </span>
@@ -240,6 +266,15 @@ export function App() {
                 element={<EnvironmentDetail />}
               />
               <Route path="/projects" element={<Projects />} />
+              <Route
+                path="/projects/:id"
+                element={
+                  <Navigate
+                    replace
+                    to={`/environments?project=${encodeURIComponent(projectTarget || "")}`}
+                  />
+                }
+              />
               <Route path="/secrets" element={<Secrets />} />
               <Route path="*" element={<Navigate replace to="/dashboard" />} />
             </Routes>

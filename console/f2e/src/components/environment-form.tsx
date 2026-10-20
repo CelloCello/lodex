@@ -42,12 +42,12 @@ export function EnvironmentForm({
   }
   const title =
     formKind === "project"
-      ? "Register project"
+      ? "Add project"
       : formKind === "create"
         ? "New worktree"
         : formKind === "attach"
-          ? "Connect existing checkout"
-          : "Add checkout";
+          ? "Use existing worktree"
+          : "Add environment";
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitted(true);
@@ -76,7 +76,11 @@ export function EnvironmentForm({
             disabled={!!busy || (kind !== "project" && !data.projects.length)}
           >
             {kind === "attach" ? <FolderInput /> : <Plus />}
-            {kind === "add" ? "Add checkout" : title}
+            {kind === "add"
+              ? "Environment"
+              : kind === "attach"
+                ? "Use existing"
+                : title}
           </Button>
         </DialogTrigger>
       )}
@@ -85,10 +89,12 @@ export function EnvironmentForm({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
             {formKind === "project"
-              ? "Register a local Git repository. Existing configuration is preserved; a missing file gets a starter configuration."
+              ? "Register a local Git repository. Missing configuration gets a starter file."
               : formKind === "attach"
-                ? "Register an existing main checkout or worktree from the same local repository. No code is copied. Prepare and service startup are separate actions."
-                : "Create a new worktree or connect an existing checkout. Prepare and service startup are separate actions."}
+                ? "The worktree must belong to this project's repository. Files stay in place."
+                : formKind === "create"
+                  ? "Creates a branch and worktree. Prepare and start services separately."
+                  : "Create a worktree or register one you already use."}
           </DialogDescription>
         </DialogHeader>
         {kind === "add" && !choice ? (
@@ -96,19 +102,15 @@ export function EnvironmentForm({
             <Button variant="outline" onClick={() => setChoice("create")}>
               <GitBranchPlus />
               <span>
-                <strong>Create a new worktree</strong>
-                <small>
-                  Create a branch and a separate checkout for this project.
-                </small>
+                <strong>New worktree</strong>
+                <small>Create a branch and working directory.</small>
               </span>
             </Button>
             <Button variant="outline" onClick={() => setChoice("attach")}>
               <FolderInput />
               <span>
-                <strong>Connect existing checkout</strong>
-                <small>
-                  Register an existing main checkout or worktree in place.
-                </small>
+                <strong>Use existing</strong>
+                <small>Register a worktree without copying files.</small>
               </span>
             </Button>
           </div>
@@ -125,12 +127,12 @@ export function EnvironmentForm({
                 }}
               >
                 <ArrowLeft />
-                Choose a different way
+                Back
               </Button>
             )}
             {formKind === "project" ? (
               <label>
-                Project name
+                ID
                 <Input name="name" required />
               </label>
             ) : (
@@ -147,7 +149,7 @@ export function EnvironmentForm({
             )}
             {formKind !== "create" ? (
               <label>
-                Absolute checkout path
+                Path
                 <Input
                   name="path"
                   required
@@ -157,11 +159,11 @@ export function EnvironmentForm({
             ) : (
               <>
                 <label>
-                  Starting Git ref
+                  Start from
                   <Input name="ref" defaultValue="HEAD" required />
                 </label>
                 <label>
-                  New branch
+                  Branch
                   <Input
                     name="branch"
                     placeholder="feature/my-change"
@@ -170,14 +172,20 @@ export function EnvironmentForm({
                 </label>
               </>
             )}
-            <label>
-              Configuration source{" "}
-              <span className="muted font-normal">Optional</span>
-              <Input
-                name="config"
-                placeholder="/absolute/path/to/project.toml"
-              />
-            </label>
+            <details className="form-options">
+              <summary>Options</summary>
+              <label>
+                Config source{" "}
+                <span className="muted font-normal">Optional</span>
+                <Input
+                  name="config"
+                  placeholder="/absolute/path/to/project.toml"
+                />
+              </label>
+              <p className="muted small">
+                Only used when configuration is missing.
+              </p>
+            </details>
             {submitted && error && (
               <p className="feedback feedback-error" role="alert">
                 {error}
@@ -192,7 +200,14 @@ export function EnvironmentForm({
               >
                 Cancel
               </Button>
-              <Button disabled={!!busy}>{busy || title}</Button>
+              <Button disabled={!!busy}>
+                {busy ||
+                  (formKind === "create"
+                    ? "Create"
+                    : formKind === "attach"
+                      ? "Register"
+                      : "Add")}
+              </Button>
             </div>
           </form>
         )}

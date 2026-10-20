@@ -235,19 +235,17 @@ test("an empty registry directs users to project registration without disabling 
   await page.goto("/#token=browser-fixture-token");
   await page.goto("/#/environments");
   await expect(
-    page.getByRole("button", { name: "Add checkout", exact: true }),
+    page.getByRole("button", { name: "Environment", exact: true }),
   ).toBeDisabled();
-  await page.getByRole("link", { name: "Register a project" }).click();
-  await page.getByRole("button", { name: "Register project" }).click();
-  await expect(
-    page.getByRole("dialog").getByLabel("Project name"),
-  ).toBeVisible();
+  await page.getByRole("link", { name: "Add project" }).click();
+  await page.getByRole("button", { name: "Add project" }).click();
+  await expect(page.getByRole("dialog").getByLabel("ID")).toBeVisible();
   await page.keyboard.press("Escape");
   await page
     .getByRole("navigation")
     .getByRole("link", { name: /^Secrets/ })
     .click();
-  await expect(page.getByRole("button", { name: "Save secret" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
 });
 
 test("theme follows the system, persists explicit choices and keeps both palettes readable", async ({
@@ -346,9 +344,9 @@ test("theme follows the system, persists explicit choices and keeps both palette
   await page.reload();
   await expect(theme).toHaveValue("dark");
   await expect(page.locator("html")).toHaveClass("dark");
-  await page.getByRole("button", { name: "Add checkout", exact: true }).click();
+  await page.getByRole("button", { name: "Environment", exact: true }).click();
   await page
-    .getByRole("button", { name: "Create a new worktree", exact: false })
+    .getByRole("button", { name: "New worktree", exact: false })
     .click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.screenshot({

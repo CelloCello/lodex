@@ -24,6 +24,7 @@ import {
   attentionReasons,
   compareEnvironments,
   latestOperation,
+  worktreeKind,
 } from "@/lib/environments";
 
 export function Environments() {
@@ -33,6 +34,9 @@ export function Environments() {
   const project = query.get("project") || "";
   const status = query.get("status") || "";
   const currentProject = data.projects.find((item) => item.id === project);
+  const hasEnvironments = data.taskenvs.some(
+    (task) => !project || task.project === project,
+  );
   function filter(key: string, value: string) {
     setQuery(
       (current) => {
@@ -74,28 +78,37 @@ export function Environments() {
   }
   return (
     <>
-      <PageHeading
-        title={project || "Environments"}
-        description="Local checkouts, services and command results. Main checkouts and worktrees belong to the project shown."
-      >
-        {project && (
-          <Button asChild variant="ghost">
-            <Link to="/projects">Project configuration</Link>
-          </Button>
+      <PageHeading title={project || "Environments"}>
+        {(!project || currentProject) && (
+          <EnvironmentForm kind="add" project={project || undefined} />
         )}
-        <EnvironmentForm kind="add" project={project || undefined} />
       </PageHeading>
       {currentProject && (
-        <code className="project-checkout-path muted">
-          {currentProject.source_checkout}
-        </code>
+        <div className="project-summary">
+          <code className="muted break-value" aria-label="Source worktree path">
+            {currentProject.source_checkout}
+          </code>
+          <details className="project-details" key={currentProject.id}>
+            <summary>Details</summary>
+            <dl className="configuration-paths">
+              <dt>Config source</dt>
+              <dd>
+                <code>{currentProject.source}</code>
+              </dd>
+            </dl>
+            <p className="muted small">
+              Used when configuration is missing. Existing worktrees keep their
+              own settings.
+            </p>
+          </details>
+        </div>
       )}
       <div className="filters">
         <div className="search-field">
           <Search />
           <Input
             aria-label="Search environments"
-            placeholder="Search branch, project or path…"
+            placeholder="Search…"
             value={search}
             onChange={(e) => filter("q", e.target.value)}
           />
@@ -118,30 +131,27 @@ export function Environments() {
           onChange={(e) => filter("status", e.target.value)}
         >
           <option value="">All statuses</option>
-          <option value="running">Has running services</option>
-          <option value="present">Checkout available</option>
+          <option value="running">Services running</option>
+          <option value="present">Available</option>
           <option value="attention">Needs attention</option>
         </select>
       </div>
       {loading ? (
         <Loading />
-      ) : !data.taskenvs.length ? (
+      ) : !hasEnvironments ? (
         <Empty
-          title="Connect your first environment"
+          title="No environments yet"
           action={
-            data.projects.length ? (
-              <EnvironmentForm kind="create" />
-            ) : (
+            !data.projects.length && (
               <Button asChild>
                 <Link to="/projects">
-                  Register a project <ArrowUpRight />
+                  Add project <ArrowUpRight />
                 </Link>
               </Button>
             )
           }
         >
-          Register a repository, then create a worktree or attach an existing
-          checkout for you and your coding agent.
+          Create a worktree or use an existing one to get started.
         </Empty>
       ) : !tasks.length ? (
         <Empty
@@ -160,10 +170,10 @@ export function Environments() {
             <TableHeader>
               <TableRow>
                 <TableHead>Environment</TableHead>
-                <TableHead>Project</TableHead>
-                <TableHead>Checkout</TableHead>
+                {!project && <TableHead>Project</TableHead>}
+                <TableHead>Worktree</TableHead>
                 <TableHead>Services</TableHead>
-                <TableHead>Latest operation</TableHead>
+                <TableHead>Last run</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -187,14 +197,19 @@ export function Environments() {
                         </code>
                         <div className="mobile-environment-summary">
                           <span>
-                            {task.project} ·{" "}
+                            {!project && `${task.project} · `}
                             {
                               task.services.filter((s) => s.state === "running")
                                 .length
                             }{" "}
                             services running
                           </span>
-                          <State value={task.state} checkout />
+                          <State value={task.state} worktree />
+                          {task.config_status !== "valid" && (
+                            <span className="text-destructive">
+                              Config: {task.config_status}
+                            </span>
+                          )}
                           {latest && (
                             <span>
                               {latest.command}: {latest.state}
@@ -202,18 +217,14 @@ export function Environments() {
                           )}
                         </div>
                       </TableCell>
+                      {!project && <TableCell>{task.project}</TableCell>}
                       <TableCell>
-                        {task.project}
-                        <div className="cell-secondary">
-                          {task.main
-                            ? "Main checkout"
-                            : task.owned
-                              ? "Managed worktree"
-                              : "Attached checkout"}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <State value={task.state} checkout />
+                        <State value={task.state} worktree />
+                        {(task.main || !task.owned) && (
+                          <div className="cell-secondary">
+                            {worktreeKind(task)}
+                          </div>
+                        )}
                         {task.config_status !== "valid" && (
                           <div className="cell-secondary text-destructive">
                             Configuration: {task.config_status}
@@ -221,16 +232,29 @@ export function Environments() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <span className="service-count">
-                          {
-                            task.services.filter((s) => s.state === "running")
-                              .length
-                          }{" "}
-                          running
-                        </span>
-                        <div className="cell-secondary">
-                          {task.services.length} recorded
-                        </div>
+                        {task.services.length ? (
+                          <>
+                            <span className="service-count">
+                              {
+                                task.services.filter(
+                                  (s) => s.state === "running",
+                                ).length
+                              }{" "}
+                              running
+                            </span>
+                            {task.services.some(
+                              (service) => service.state !== "running",
+                            ) && (
+                              <div className="cell-secondary">
+                                {task.services.length} total
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <span className="muted" title="No recorded services">
+                            —
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
                         {latest ? (
@@ -241,7 +265,9 @@ export function Environments() {
                             </div>
                           </>
                         ) : (
-                          <span className="muted">No operations yet</span>
+                          <span className="muted" title="No recorded runs">
+                            —
+                          </span>
                         )}
                       </TableCell>
                     </TableRow>
@@ -291,10 +317,7 @@ export function Projects() {
   );
   return (
     <>
-      <PageHeading
-        title="Projects"
-        description="Local repositories and their configuration sources."
-      >
+      <PageHeading title="Projects">
         <EnvironmentForm kind="project" />
       </PageHeading>
       <div className="filters">
@@ -302,7 +325,7 @@ export function Projects() {
           <Search />
           <Input
             aria-label="Search projects"
-            placeholder="Search name or repository path…"
+            placeholder="Search…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -311,13 +334,9 @@ export function Projects() {
       {loading ? (
         <Loading />
       ) : !projects.length ? (
-        <Empty
-          title={
-            search ? "No matching projects" : "Register a local repository"
-          }
-        >
+        <Empty title={search ? "No matching projects" : "No projects yet"}>
           Each project connects a Git repository to its environments.
-          Registration does not create or prepare a checkout.
+          Registration does not create or prepare an environment.
         </Empty>
       ) : (
         <div className="project-list">
@@ -334,7 +353,7 @@ export function Projects() {
                 </h2>
                 <code className="muted break-value">{p.source_checkout}</code>
                 <div className="project-source">
-                  <span className="muted">Configuration source</span>
+                  <span className="muted">Config source</span>
                   <code>{p.source}</code>
                 </div>
               </div>

@@ -30,7 +30,7 @@ def test_resolve_respects_nested_checkout_boundary(
     subdir = nested / "src"
     subdir.mkdir()
     for path in (nested, subdir, subdir / "not-created"):
-        with pytest.raises(ManagementError, match="No registered taskenv"):
+        with pytest.raises(ManagementError, match="No registered environment"):
             worktrees.resolve(registry, str(path))
     for command in (("context",), ("prepare",), ("cleanup",), ("worktree", "remove")):
         result = subprocess.run(

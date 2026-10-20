@@ -50,10 +50,10 @@ def export(
         path = root / relative
         if Path(relative).is_absolute() or ".." in Path(relative).parts or path.is_symlink():
             raise ManagementError(
-                "invalid_output", "Output must be a regular file inside the checkout"
+                "invalid_output", "Output must be a regular file inside the worktree"
             )
         if not path.parent.is_dir() or root not in path.resolve().parents:
-            raise ManagementError("invalid_output", "Output parent must exist inside the checkout")
+            raise ManagementError("invalid_output", "Output parent must exist inside the worktree")
         _config, values, known = inputs(registry, task, provider)
         if git(root, "ls-files", "--", relative):
             raise ManagementError(

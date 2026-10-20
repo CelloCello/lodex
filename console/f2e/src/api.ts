@@ -25,6 +25,8 @@ export type Task = {
   project: string;
   path: string;
   branch: string | null;
+  head?: string | null;
+  git_error?: string;
   state: string;
   owned: boolean;
   main: boolean;

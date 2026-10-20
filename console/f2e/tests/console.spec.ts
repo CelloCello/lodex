@@ -87,14 +87,12 @@ test("register, create and remove a worktree through the console", async ({
     await page.goto("/#/environments");
     await page.goto("/#/projects");
     await page
-      .getByRole("button", { name: "Register project", exact: true })
+      .getByRole("button", { name: "Add project", exact: true })
       .click();
     const dialog = page.getByRole("dialog");
-    await dialog.getByLabel("Project name").fill("ui-fixture");
-    await dialog.getByLabel("Absolute checkout path").fill(repo);
-    await dialog
-      .getByRole("button", { name: "Register project", exact: true })
-      .click();
+    await dialog.getByLabel("ID").fill("ui-fixture");
+    await dialog.getByLabel("Path").fill(repo);
+    await dialog.getByRole("button", { name: "Add", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole("status")).toContainText(
       "Configuration initialized",
@@ -104,35 +102,27 @@ test("register, create and remove a worktree through the console", async ({
       has: page.getByRole("heading", { name: "ui-fixture", exact: true }),
     });
     await expect(project).toContainText(repo);
-    await project
-      .getByRole("button", { name: "Connect existing checkout" })
-      .click();
-    await dialog.getByLabel("Absolute checkout path").fill(repo);
-    await dialog
-      .getByRole("button", { name: "Connect existing checkout", exact: true })
-      .click();
-    await expect(page.locator(".detail-meta")).toContainText("Main checkout");
+    await project.getByRole("button", { name: "Use existing" }).click();
+    await dialog.getByLabel("Path").fill(repo);
+    await dialog.getByRole("button", { name: "Register", exact: true }).click();
+    await expect(page.locator(".detail-meta")).toContainText("Main");
     await page
       .getByRole("tab", { name: "Cleanup & removal", exact: true })
       .click();
     await expect(
       page.getByRole("button", { name: "Preview removal" }),
     ).toBeDisabled();
-    await page
-      .getByRole("button", { name: "Forget registration", exact: true })
-      .click();
+    await page.getByRole("button", { name: "Unregister", exact: true }).click();
     await dialog
-      .getByRole("button", { name: "Forget registration", exact: true })
+      .getByRole("button", { name: "Unregister", exact: true })
       .click();
     await expect(
       page.getByRole("heading", { name: "Environments", exact: true }),
     ).toBeVisible();
     await page.goto("/#/projects");
     await project.getByRole("button", { name: "New worktree" }).click();
-    await dialog.getByLabel("New branch").fill("feature/from-console");
-    await dialog
-      .getByRole("button", { name: "New worktree", exact: true })
-      .click();
+    await dialog.getByLabel("Branch").fill("feature/from-console");
+    await dialog.getByRole("button", { name: "Create", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "feature/from-console", exact: true }),
     ).toBeVisible();
@@ -171,19 +161,18 @@ test("register, create and remove a worktree through the console", async ({
         .getByRole("status")
         .filter({ hasText: "registry record is retained" }),
     ).toBeVisible();
-    const removed = page.getByRole("row").filter({
-      has: page.getByRole("cell", { name: /ui-fixture Managed worktree/ }),
-    });
+    const removed = page
+      .getByRole("row")
+      .filter({ hasText: "ui-fixture" })
+      .filter({ hasText: "feature-from-console" });
     await expect(removed).toContainText("missing");
     await removed.getByRole("link").click();
     await page
       .getByRole("tab", { name: "Cleanup & removal", exact: true })
       .click();
-    await page
-      .getByRole("button", { name: "Forget registration", exact: true })
-      .click();
+    await page.getByRole("button", { name: "Unregister", exact: true }).click();
     await dialog
-      .getByRole("button", { name: "Forget registration", exact: true })
+      .getByRole("button", { name: "Unregister", exact: true })
       .click();
     await expect(
       page.getByRole("heading", { name: "Environments", exact: true }),
@@ -272,11 +261,11 @@ test("CLI-created environment can be managed from browser without replaying writ
     await page.getByRole("cell", { name: "slow", exact: true }).count(),
   ).toBe(1);
   await page.getByRole("link", { name: /^Secrets/ }).click();
-  await page.getByLabel("Stored name").fill("browser-secret");
+  await page.getByLabel("Name").fill("browser-secret");
   await page
     .getByLabel("Value", { exact: true })
     .fill("synthetic-browser-only");
-  await page.getByRole("button", { name: "Save secret" }).click();
+  await page.getByRole("button", { name: "Save" }).click();
   await expect(
     page.getByRole("strong").filter({ hasText: /^browser-secret$/ }),
   ).toBeVisible();
@@ -343,13 +332,13 @@ test("CLI-created environment can be managed from browser without replaying writ
     await expect(
       page.getByRole("button", { name: "Preview removal" }),
     ).toBeDisabled();
-    await page.getByRole("button", { name: "Forget registration" }).click();
+    await page.getByRole("button", { name: "Unregister" }).click();
     await expect(page.getByRole("dialog")).toContainText(
       "does not stop services",
     );
     await page
       .getByRole("dialog")
-      .getByRole("button", { name: "Forget registration", exact: true })
+      .getByRole("button", { name: "Unregister", exact: true })
       .click();
     await expect(
       page.getByRole("heading", { name: "Environments", exact: true }),

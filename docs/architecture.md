@@ -52,7 +52,7 @@ and Console Server open Core's `Registry` to access the same management database
 the server does not maintain a separate database or implement SQL. Interface
 code handles requests and composes responses, while shared worktree operations,
 including registration removal (`forget`), live in Core. Forgetting removes only
-the taskenv registration; it preserves the checkout, resource records, and shared
+the taskenv registration; it preserves the worktree, resource records, and shared
 secrets. History uses its own database, separate from management state.
 
 | Directory | Distribution | Import package | Runtime dependencies within Lodex |

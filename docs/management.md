@@ -3,10 +3,34 @@
 [Back to README](../README.md)
 
 Lodex's environment tools give you and your coding agent a shared way to prepare
-task checkouts, run repository commands and manage services. Use the CLI directly
+task environments, run repository commands and manage services. Use the CLI directly
 or let an agent call it through the bundled project-setup, worktree and services
 skills. Environment state and logs remain available when you change callers or
 start another agent session.
+
+## Terminology
+
+| Term | Meaning |
+| --- | --- |
+| Project（專案） | A registered local Git repository, identified by a project ID. |
+| Environment / task environment（任務環境） | Lodex's registration associating one Git worktree with settings, allocated ports, services and operation records. `taskenv` is the internal/API name and the stable environment ID is also called a taskenv ID. |
+| Git worktree（Git 工作目錄） | The physical working directory, either the repository's main worktree or a linked worktree. A worktree can exist without a registered Lodex environment. |
+| Environment variables（環境變數） | Values supplied to a command or service; distinct from an environment registration. |
+
+The Console uses **Environment** for the managed object and **worktree** when an
+action concerns the Git directory. Adding an environment either creates a new
+worktree or attaches an existing one. Removing a worktree retains the environment
+record; **Unregister** (`worktree forget`) removes that registration
+without deleting its files. A branch is observed context, not an environment ID.
+Older material may call the physical directory a *checkout*; this is not a fourth
+managed object. References to a source checkout in packaging instructions mean
+the repository's source working directory.
+
+Project registration data is currently read-only after creation. The project ID
+is also used by CLI commands and environment registrations; it is not a separately
+editable display name. Project pages show the source worktree, with the
+configuration source under Details. Each worktree reads its own `.lodex/project.toml`;
+editing a source file does not synchronize other environments' configuration.
 
 Management is CLI-first and works without Codex or Ollama. History commands
 retain their own configuration and database under `$LODEX_HOME/history` by default.
@@ -18,23 +42,23 @@ The slug uses lowercase ASCII letters and digits, replaces runs of other charact
 (including `/`) with `-`, trims edge hyphens, and is capped at 64 characters.
 An empty slug uses `worktree`. The suffix is the first eight characters of the
 full 16-character taskenv ID. ID or path collisions generate a fresh ID before
-Git creates the checkout; existing files and retained taskenv paths are not reused.
+Git creates the worktree; existing files and retained taskenv paths are not reused.
 
 Directory names are fixed at creation. Branch renames or switches do not move
-checkouts or change taskenv IDs. Existing paths, including older ID-only directories
-and attached checkouts, remain unchanged; no migration is needed. Use the returned
+worktrees or change taskenv IDs. Existing paths, including older ID-only directories
+and attached worktrees, remain unchanged; no migration is needed. Use the returned
 full ID or absolute path with `--target`, not the slug or short suffix alone.
 
 ```sh
 lodex project add app /absolute/repo --config /absolute/project.toml --json
 lodex worktree create app --ref main --branch feature-one --json
-lodex worktree attach app /absolute/existing-checkout --json
-lodex context --target /absolute/checkout/subdirectory --json
+lodex worktree attach app /absolute/existing-worktree --json
+lodex context --target /absolute/worktree/subdirectory --json
 lodex worktree list --json
 lodex worktree inspect --target TASKENV_ID --json
 ```
 
-`project add NAME PATH` registers the repository and ensures its checkout has
+`project add NAME PATH` registers the repository and ensures its worktree has
 `.lodex/project.toml`:
 
 - Existing configuration is validated and preserved, even with `--config`.
@@ -48,30 +72,30 @@ lodex worktree inspect --target TASKENV_ID --json
 The response's `configuration` reports `method` (`existing`, `copied` or
 `initialized`) and `path`; initialization also returns a `next_step` to edit the
 recipe. A skeleton allows registration but needs repository-specific commands
-before prepare/start can work. It does not automatically attach the checkout.
-New project registrations use this checkout's TOML as the source for subsequent
+before prepare/start can work. It does not automatically attach the worktree.
+New project registrations use this worktree's TOML as the source for subsequent
 worktrees, so editing the local copy is sufficient; the original `--config` file
 is not a continuing dependency. Repeated registration preserves the registered
-project identity/source and validates the target checkout's current recipe.
+project identity/source and validates the target worktree's current recipe.
 Registry conflicts and a busy lock fail before creating configuration files.
 
 ID or absolute directory selects an environment. No session, branch, remote or
 global current environment is inferred. Two clones of the same remote are distinct
-projects. One checkout has one current taskenv. Main/external/detached checkouts can
+projects. One worktree has one current taskenv. Main/external/detached worktrees can
 be attached in place. Inspect retains records for missing/replaced paths; context
 rejects them. Git common-dir and directory identities are checked before operations.
-An absolute path inside a nested repository or worktree selects that checkout only
-if it is registered; it never falls back to an enclosing checkout's taskenv.
+An absolute path inside a nested repository or worktree selects that worktree only
+if it is registered; it never falls back to an enclosing worktree's taskenv.
 The current directory is read only when a target-taking command omits `--target`.
-If that directory was deleted, pass an explicit ID or absolute checkout path;
+If that directory was deleted, pass an explicit ID or absolute worktree path;
 commands such as `project list` do not need a current directory.
 
 Worktree creation acquires the registry lock before invoking Git and holds it
 through registration. A busy registry returns `busy` without creating a branch or
-checkout. If Git succeeds but configuration setup fails, the owned checkout remains
+worktree. If Git succeeds but configuration setup fails, the owned worktree remains
 registered for inspection and a later `worktree attach` retry.
 
-Each checkout owns `.lodex/project.toml`. An existing file wins, even if invalid
+Each worktree owns `.lodex/project.toml`. An existing file wins, even if invalid
 (invalid content reports an error and is not replaced). Create, attach and prepare
 copy only a missing file from the explicit `--config` or registered source. The
 source may be tracked, untracked or ignored. Copies are independent; no .env,
@@ -95,24 +119,24 @@ command name. Replace uppercase placeholders with actual values; square brackets
 indicate optional arguments and are not typed literally.
 
 Commands marked **Target** accept `[--target TASKENV_ID_OR_ABSOLUTE_PATH]`.
-Without it, Lodex resolves the registered checkout containing the current
+Without it, Lodex resolves the registered worktree containing the current
 directory. Relative target paths are not accepted. Port keys, command and service
 names must be declared in `.lodex/project.toml`. Secret commands use central stored
-names, without a `secret:` prefix, and need no project, checkout or `--target`.
+names, without a `secret:` prefix, and need no project, worktree or `--target`.
 
 ### Projects and worktrees
 
 | Command | Target | Purpose |
 | --- | --- | --- |
-| `project add NAME PATH [--config PATH]` | No | Register a repository, preserve its existing recipe or create/copy a missing one; does not attach a checkout. |
+| `project add NAME PATH [--config PATH]` | No | Register a repository, preserve its existing recipe or create/copy a missing one; does not attach a worktree. |
 | `project list` | No | List registered projects. |
-| `worktree create PROJECT --ref REF --branch BRANCH [--config PATH]` | No | Create a new branch and owned checkout from a Git ref, then register it; does not run prepare. |
-| `worktree attach PROJECT PATH [--config PATH]` | No | Register an existing checkout belonging to the project's local repository, including its main checkout. |
+| `worktree create PROJECT --ref REF --branch BRANCH [--config PATH]` | No | Create a new branch and owned worktree from a Git ref, then register it; does not run prepare. |
+| `worktree attach PROJECT PATH [--config PATH]` | No | Register an existing worktree belonging to the project's local repository, including its main worktree. |
 | `worktree list` | No | List registered environments and their current inspection state. |
-| `worktree inspect` | Yes | Inspect configuration, checkout identity and known resource records, even when the checkout is missing. |
-| `context` | Yes | Resolve and inspect an environment whose checkout is still present and matches its saved identity. |
-| `worktree remove [--yes] [--force]` | Yes | Preview deletion of an owned checkout; `--yes` executes, `--force` overrides Git protection. Retain the branch and taskenv record. |
-| `worktree forget [--yes]` | Yes | Preview or execute deregistration only; do not stop services or delete checkout files. |
+| `worktree inspect` | Yes | Inspect configuration, worktree identity and known resource records, even when the worktree is missing. |
+| `context` | Yes | Resolve and inspect an environment whose worktree is still present and matches its saved identity. |
+| `worktree remove [--yes] [--force]` | Yes | Preview deletion of an owned worktree; `--yes` executes, `--force` overrides Git protection. Retain the branch and taskenv record. |
+| `worktree forget [--yes]` | Yes | Preview or execute deregistration only; do not stop services or delete worktree files. |
 
 ### Repository commands, services and operations
 
@@ -135,7 +159,7 @@ names, without a `secret:` prefix, and need no project, checkout or `--target`.
 | Command | Target | Purpose |
 | --- | --- | --- |
 | `env show` | Yes | Show resolved ordinary settings, port assignments and secret references, without secret values. |
-| `env export [--output RELATIVE_PATH]` | Yes | Write resolved values, including secrets, to `.env` or a relative path inside the checkout; the parent must already exist. |
+| `env export [--output RELATIVE_PATH]` | Yes | Write resolved values, including secrets, to `.env` or a relative path inside the worktree; the parent must already exist. |
 | `port set KEY VALUE` | Yes | Change a declared port assignment to an available port from 1–65535; does not restart services. |
 | `secret list` | No | List all stored secret names in the management DB, never their values; works before any project is registered. |
 | `secret set NAME [--stdin]` | No | Create or update a central value using hidden terminal input or a trusted pipe. |
@@ -144,7 +168,7 @@ names, without a `secret:` prefix, and need no project, checkout or `--target`.
 For example, `API_TOKEN` is the environment variable name while `secret:app-token`
 is its storage reference. `lodex secret set app-token` manages that value directly.
 Setting or removing it affects every environment using that reference in the same
-management DB. Edit ordinary values and reference mappings in each checkout's
+management DB. Edit ordinary values and reference mappings in each worktree's
 TOML; there is no DB override layer. `env show` displays the resolved ordinary
 values, allocated identifiers/ports and configured references without requiring
 the secrets to be set. It does not read an existing `.env`.
@@ -222,14 +246,14 @@ entry; it does not promise forensic erasure of SQLite pages, journals or backups
 
 The same `secret:NAME` in one management DB shares a value across projects and
 taskenvs. Use distinct names and TOML mappings for separate credentials. Editing
-one checkout's mapping does not affect another checkout. A new command/service
+one worktree's mapping does not affect another worktree. A new command/service
 start or export reads the current values; running processes and existing exports
 do not update automatically.
 Names are references, not secret values. Writable commands upgrade management
 schema 1 or 2 to 3; read-only commands do not migrate. The upgrade removes obsolete
 taskenv `settings` and `secret_refs` overrides, keeps stored secret values and other
 records, and does not edit TOML. Ordinary values and mappings now come only from
-each checkout's current TOML.
+each worktree's current TOML.
 Older `keychain:` references are rejected with instructions to use `secret:NAME`
 and set the value again by name.
 Existing Keychain values are neither read, migrated nor deleted automatically.
@@ -290,7 +314,7 @@ health or database isolation. A worker without it is running after surviving the
 initial startup interval and needs no URL. Every service requires `argv` and
 represents a process Lodex can start and stop. File edits do not trigger a Lodex
 restart. New operations use current configuration;
-stop uses saved service identity even when its config item or checkout is gone.
+stop uses saved service identity even when its config item or worktree is gone.
 
 Third-party APIs and shared dependencies use connection settings in `[env]` and
 credentials in `[secrets]`; the application connects to them directly. To give
@@ -324,7 +348,7 @@ lodex worktree remove --target ID --yes --json
 The first command previews Git state, deletion range and known service/operation
 records. Stop/resolve services first. Normal removal preserves Git refusal for
 dirty or untracked content. Only explicit `--force` overrides Git protection;
-ignored files are also deleted and the branch is retained. External/main checkouts
+ignored files are also deleted and the branch is retained. External/main worktrees
 cannot be removed. Taskenv records remain inspectable after removal.
 
 `worktree forget --target ID` previews deregistration; `--yes` removes the taskenv
@@ -355,14 +379,14 @@ the actual repo commands and resource isolation when connecting a project.
 
 ## Entry points and handoff
 
-- **CLI-first:** register a repository, create a worktree or attach a checkout,
+- **CLI-first:** register a repository, create a worktree or attach a worktree,
   then prepare and operate its configured services. Each create/attach response
   supplies the taskenv ID and absolute directory for subsequent commands.
 - **Agent calling Lodex:** use the same CLI with `--json` and an explicit target.
   A new conversation inspects the existing ID/path; it does not implicitly create
   another environment or restart services. Skills guide the repo-specific setup.
 - **Externally created worktree:** run `lodex worktree attach PROJECT /absolute/path`.
-  Lodex keeps that checkout in place and does not acquire permission to delete it.
+  Lodex keeps that worktree in place and does not acquire permission to delete it.
 
 The [console](console.md) is another caller of the same core, not another owner
 of the environment. Worktree inspection reports the currently observed branch

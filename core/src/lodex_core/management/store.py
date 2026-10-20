@@ -100,7 +100,8 @@ class Registry:
             "SELECT data FROM records WHERE kind=? AND id=?", (kind, identity)
         ).fetchone()
         if row is None:
-            raise ManagementError("not_found", f"Unknown {kind}: {identity}")
+            noun = "environment" if kind == "taskenv" else kind
+            raise ManagementError("not_found", f"Unknown {noun}: {identity}")
         result: dict[str, Any] = json.loads(row[0])
         return result
 

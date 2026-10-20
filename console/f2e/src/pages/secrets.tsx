@@ -24,20 +24,14 @@ export function Secrets() {
   const valueInput = useRef<HTMLInputElement>(null);
   return (
     <>
-      <PageHeading
-        title="Secrets"
-        description="Shared values, available to every project by name."
-      />
+      <PageHeading title="Secrets" description="Shared across projects." />
       <section className="form-section">
         <div>
           <h2>
             <KeyRound size={18} />
-            Add or update a secret
+            Set value
           </h2>
-          <p className="muted">
-            Stored values cannot be read back. Enter a new value to replace an
-            existing name for all references.
-          </p>
+          <p className="muted">Saved values cannot be read back.</p>
         </div>
         <form
           className="inline-form"
@@ -53,7 +47,7 @@ export function Secrets() {
           }}
         >
           <label>
-            Stored name
+            Name
             <Input
               name="name"
               value={storedName}
@@ -75,14 +69,19 @@ export function Secrets() {
           </label>
           <Button disabled={!!busy}>
             <Plus />
-            Save secret
+            Save
           </Button>
         </form>
         <p className="muted small">
-          Values are stored in plaintext in the local SQLite database under
-          private file permissions and are never returned here. Running services
-          keep their current values until restarted.
+          Running services keep their current values until restarted.
         </p>
+        <details className="form-options">
+          <summary>Storage</summary>
+          <p className="muted small">
+            Values are stored in the local SQLite database in plaintext, with
+            private file permissions. They are never returned here.
+          </p>
+        </details>
       </section>
       {loading ? (
         <Loading />
@@ -92,11 +91,11 @@ export function Secrets() {
         </Empty>
       ) : (
         <div className="data-panel">
-          <Table>
+          <Table className="secret-table">
             <TableHeader>
               <TableRow>
-                <TableHead>Stored name</TableHead>
-                <TableHead>How to reference</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Reference</TableHead>
                 <TableHead>
                   <span className="sr-only">Actions</span>
                 </TableHead>
@@ -107,19 +106,15 @@ export function Secrets() {
                 <TableRow key={name}>
                   <TableCell>
                     <strong>{name}</strong>
-                    <div className="cell-secondary">
-                      Stored · value is not returned
-                    </div>
                   </TableCell>
                   <TableCell>
                     <code>secret:{name}</code>
                     <details className="secret-reference">
-                      <summary>Use in project.toml</summary>
+                      <summary>Usage</summary>
                       <pre>{`[secrets]\nAPI_TOKEN = ${JSON.stringify(`secret:${name}`)}`}</pre>
                       <p className="muted small">
-                        API_TOKEN is the environment variable your application
-                        receives. {name} is the stored name. This example is not
-                        a list of projects using the secret.
+                        Add this to <code>.lodex/project.toml</code>. API_TOKEN
+                        is the variable your app receives.
                       </p>
                     </details>
                   </TableCell>
@@ -135,7 +130,7 @@ export function Secrets() {
                         }
                       }}
                     >
-                      Replace value<span className="sr-only"> for {name}</span>
+                      Replace<span className="sr-only"> {name}</span>
                     </Button>
                     <Button
                       variant="ghost"

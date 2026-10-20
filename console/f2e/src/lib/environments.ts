@@ -13,7 +13,7 @@ export function latestOperation(task: Task): Operation | undefined {
 
 export function attentionReasons(task: Task): string[] {
   const reasons: string[] = [];
-  if (task.state !== "present") reasons.push(`Checkout: ${task.state}`);
+  if (task.state !== "present") reasons.push(`Worktree: ${task.state}`);
   if (task.config_status !== "valid")
     reasons.push(`Configuration: ${task.config_status}`);
   for (const service of task.services)
@@ -28,12 +28,8 @@ export function attentionReasons(task: Task): string[] {
 export const runningServices = (task: Task) =>
   task.services.filter((service) => service.state === "running").length;
 
-export const checkoutKind = (task: Task) =>
-  task.main
-    ? "Main checkout"
-    : task.owned
-      ? "Managed worktree"
-      : "Attached checkout";
+export const worktreeKind = (task: Task) =>
+  task.main ? "Main" : task.owned ? "Created by Lodex" : "Attached";
 
 export function compareEnvironments(selected?: string) {
   const priority = (task: Task) =>

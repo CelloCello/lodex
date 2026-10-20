@@ -17,16 +17,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   attentionReasons,
-  checkoutKind,
   compareEnvironments,
   environmentPath,
   runningServices,
 } from "@/lib/environments";
 
-export function useProjectNavigation(data: Overview, target?: string) {
+export function useProjectNavigation(
+  data: Overview,
+  target?: string,
+  selectedProject?: string,
+) {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const project = data.taskenvs.find((task) => task.id === target)?.project;
+  const project =
+    selectedProject ||
+    data.taskenvs.find((task) => task.id === target)?.project;
   const first = data.projects[0]?.id || data.taskenvs[0]?.project;
   useEffect(() => {
     const id = project || first;
@@ -36,6 +41,7 @@ export function useProjectNavigation(data: Overview, target?: string) {
       );
   }, [project, first, target]);
   return {
+    project,
     search,
     setSearch,
     expanded,
@@ -67,7 +73,7 @@ export function ProjectNavigation({
   onRegister: (trigger: HTMLButtonElement) => void;
   busy: boolean;
 }) {
-  const { search, setSearch, expanded, toggle } = navigation;
+  const { search, setSearch, expanded, toggle, project } = navigation;
   const prefix = useId();
   const ids = [
     ...new Set([
@@ -86,14 +92,14 @@ export function ProjectNavigation({
       <div className="project-tree-search search-field">
         <Search />
         <Input
-          aria-label="Search all projects and checkouts"
-          placeholder="Search projects, branches or paths…"
+          aria-label="Search all projects and environments"
+          placeholder="Search…"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
       </div>
-      <div className="project-tree" aria-label="Projects and checkouts">
-        <h2 className="tree-heading">Projects and checkouts</h2>
+      <div className="project-tree" aria-label="Projects and environments">
+        <h2 className="tree-heading">Projects</h2>
         {ids.map((id, index) => {
           const tasks = data.taskenvs
             .filter(
@@ -120,18 +126,28 @@ export function ProjectNavigation({
                   className="tree-project-toggle"
                   aria-expanded={open}
                   aria-controls={region}
+                  aria-label={`Toggle ${id}`}
                   onClick={() => toggle(id)}
                 >
                   {open ? <ChevronDown /> : <ChevronRight />}
+                </button>
+                <Link
+                  className="tree-project-link"
+                  to={`/environments?project=${encodeURIComponent(id)}`}
+                  aria-label={`Open project ${id}`}
+                  aria-current={!target && project === id ? "page" : undefined}
+                  onClick={onNavigate}
+                  title={id}
+                >
                   <FolderGit2 />
                   <span>{id}</span>
-                </button>
+                </Link>
                 {data.projects.some((project) => project.id === id) && (
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={`Add checkout to ${id}`}
-                    title="Add checkout"
+                    aria-label={`Add environment to ${id}`}
+                    title="Add environment"
                     disabled={busy}
                     onClick={(event) => onAdd(id, event.currentTarget)}
                   >
@@ -156,11 +172,15 @@ export function ProjectNavigation({
                       {task.main ? <FolderOpen /> : <GitBranch />}
                       <span className="tree-checkout-copy">
                         <span>{taskLabel(task)}</span>
-                        <small>
-                          {task.state !== "present"
-                            ? `Checkout: ${task.state}`
-                            : checkoutKind(task)}
-                        </small>
+                        {task.state !== "present" && (
+                          <small>
+                            {task.state === "identity_mismatch"
+                              ? "Replaced"
+                              : task.state === "missing"
+                                ? "Missing"
+                                : "Unavailable"}
+                          </small>
+                        )}
                       </span>
                       <span
                         className={`tree-status ${attention.length ? "tree-status-warning" : running ? "tree-status-running" : ""}`}
@@ -177,26 +197,26 @@ export function ProjectNavigation({
                 {!tasks.length && (
                   <p className="tree-empty muted">
                     {search
-                      ? "No matching checkouts"
-                      : "No connected checkouts"}
+                      ? "No matching environments"
+                      : "No registered environments"}
                   </p>
                 )}
-                <Link
-                  className="tree-view-all"
-                  to={`/environments?project=${encodeURIComponent(id)}${search ? `&q=${encodeURIComponent(search)}` : ""}`}
-                  onClick={onNavigate}
-                >
-                  {search ? "View matching checkouts" : "View all checkouts"}
-                  <ChevronRight />
-                </Link>
+                {tasks.length > 6 && (
+                  <Link
+                    className="tree-view-all"
+                    to={`/environments?project=${encodeURIComponent(id)}${search ? `&q=${encodeURIComponent(search)}` : ""}`}
+                    onClick={onNavigate}
+                  >
+                    Show all
+                    <ChevronRight />
+                  </Link>
+                )}
               </div>
             </section>
           );
         })}
         {!ids.length && (
-          <p className="tree-empty muted">
-            Register a project to connect your first checkout.
-          </p>
+          <p className="tree-empty muted">Add a project to get started.</p>
         )}
         {!!ids.length &&
           search &&
@@ -209,7 +229,7 @@ export function ProjectNavigation({
               .includes(search.toLowerCase()),
           ) && (
             <p className="tree-empty muted">
-              No matching projects or checkouts.
+              No matching projects or environments.
             </p>
           )}
       </div>
@@ -223,16 +243,14 @@ export function ProjectNavigation({
         <Button
           className="register-project"
           variant="ghost"
-          aria-label="Register a project"
+          aria-label="Add a project"
           disabled={busy}
           onClick={(event) => onRegister(event.currentTarget)}
         >
           <Plus />
-          Register project
+          Add project
         </Button>
-        <p className="muted small">
-          Shared with your CLI. Services keep running when you leave.
-        </p>
+        <p className="muted small">Shared with your CLI.</p>
       </div>
     </div>
   );

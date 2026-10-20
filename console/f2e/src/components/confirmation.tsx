@@ -34,10 +34,10 @@ export function ConfirmationDialog({
     action?.action === "cleanup"
       ? "Run cleanup"
       : action?.action === "secret.remove"
-        ? "Remove shared secret"
+        ? "Remove secret"
         : removing
           ? "Remove worktree"
-          : "Forget registration";
+          : "Unregister environment";
   return (
     <Dialog
       open={!!confirmation}
@@ -63,13 +63,13 @@ export function ConfirmationDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            Review the affected scope before continuing.
+            Review the scope before continuing.
           </DialogDescription>
         </DialogHeader>
         <div className="confirmation-scope">
           {preview.path != null && (
             <div>
-              <span className="field-title">Checkout path</span>
+              <span className="field-title">Worktree path</span>
               <code className="break-value">{String(preview.path)}</code>
             </div>
           )}
@@ -185,7 +185,8 @@ export function ConfirmationDialog({
               }
             }}
           >
-            {busy || title}
+            {busy ||
+              (action?.action === "worktree.forget" ? "Unregister" : title)}
           </Button>
         </div>
       </DialogContent>

@@ -120,9 +120,12 @@ to make checkout changes available in an installed release.
 
 ### Manage a local task environment
 
-A project is a registered local Git repository. A task environment associates
-one checkout with settings, allocated ports, command records and services.
-Registering a project does not automatically attach its existing checkout.
+A project is a registered local Git repository. An environment (task environment,
+internally `taskenv`) associates one Git worktree with settings, allocated ports,
+command records and services. A worktree is the physical Git working directory;
+the environment record can remain after that directory is removed.
+Registering a project does not automatically register an environment for its main
+worktree. See the [shared terminology](docs/management.md#terminology).
 
 `project add` validates and keeps an existing `.lodex/project.toml`. If it is
 missing, it creates a minimal skeleton, or copies the recipe passed with

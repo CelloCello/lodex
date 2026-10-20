@@ -64,7 +64,7 @@ def project_add(registry: Registry, label: str, path: Path, source: Path | None)
                     existing = project
                     break
                 raise ManagementError(
-                    "already_registered", "Project name or local repository is registered"
+                    "already_registered", "Project ID or repository is already registered"
                 )
         configuration = supply(root, source)
         if existing is None:
@@ -147,16 +147,16 @@ def _attach_locked(
     project = registry.get("project", project_id)
     info = identity(path)
     if info["common"] != project["common"] or info["common_inode"] != project["common_inode"]:
-        raise ManagementError(
-            "wrong_repository", "Checkout belongs to a different local repository"
-        )
+        raise ManagementError("wrong_repository", "Worktree belongs to a different repository")
     for task in registry.all("taskenv"):
         if task["path"] == info["path"]:
             with registry.lock(task["id"]):
                 registry.reload_task(task)
                 require_present(task)
                 if task["project"] != project_id:
-                    raise ManagementError("already_registered", "Checkout has another project")
+                    raise ManagementError(
+                        "already_registered", "Worktree is registered to another project"
+                    )
                 provenance = supply(Path(info["path"]), source or Path(project["source"]))
                 if provenance["method"] == "copied":
                     task["config_source"] = provenance
@@ -228,7 +228,8 @@ def create(
             }
             registry.put("taskenv", task)
             raise ManagementError(
-                "partial_create", f"Taskenv {task_id} exists at {path}; attach after fixing: {exc}"
+                "partial_create",
+                f"Environment {task_id} exists at {path}; use worktree attach after fixing: {exc}",
             ) from exc
 
 
@@ -245,7 +246,9 @@ def state(task: dict[str, Any]) -> str:
 def require_present(task: dict[str, Any]) -> Path:
     status = state(task)
     if status != "present":
-        raise ManagementError(status, f"Taskenv {task['id']} checkout is {status}: {task['path']}")
+        raise ManagementError(
+            status, f"Environment {task['id']}: worktree is {status}: {task['path']}"
+        )
     return Path(task["path"])
 
 
@@ -259,7 +262,7 @@ def resolve(registry: Registry, selector: str) -> dict[str, Any]:
         if path == Path(t["path"]) or Path(t["path"]) in path.parents
     ]
     if not matches:
-        raise ManagementError("not_found", f"No registered taskenv at {path}")
+        raise ManagementError("not_found", f"No registered environment at {path}")
     task = max(matches, key=lambda t: len(t["path"]))
     root = Path(task["path"])
     # Exact/missing recorded roots remain addressable for inspect and service stop.
@@ -271,7 +274,7 @@ def resolve(registry: Registry, selector: str) -> dict[str, Any]:
         while not probe.is_dir() and probe != root:
             probe = probe.parent
         if Path(git(probe, "rev-parse", "--show-toplevel")).resolve() != root:
-            raise ManagementError("not_found", f"No registered taskenv at {path}")
+            raise ManagementError("not_found", f"No registered environment at {path}")
     return task
 
 
@@ -293,7 +296,7 @@ def inspect(registry: Registry, task: dict[str, Any]) -> dict[str, Any]:
     config_status = "missing"
     cleanup: dict[str, Any] = {
         "available": False,
-        "reason": "Restore checkout/config/scripts or clean resources manually",
+        "reason": "Restore the worktree, configuration and scripts, or clean resources manually",
     }
     try:
         config = load(Path(task["path"]) / CONFIG)
@@ -369,7 +372,7 @@ def remove(registry: Registry, task: dict[str, Any], *, yes: bool, force: bool) 
             return preview
         if not task["owned"] or task["main"]:
             raise ManagementError(
-                "protected_checkout", "Cannot remove an external or main checkout"
+                "protected_checkout", "Cannot remove an attached or main worktree"
             )
         # Legacy URL-only records have no managed process and do not block removal.
         if any(

@@ -58,17 +58,13 @@ export function Dashboard() {
   if (loading) return <Loading />;
   return (
     <>
-      <PageHeading
-        title="Overview"
-        description="Your local projects, services and recorded outcomes at a glance."
-      />
+      <PageHeading title="Overview" />
       {!data.projects.length && !data.taskenvs.length ? (
         <Empty
-          title="Register your first project"
+          title="No projects yet"
           action={<EnvironmentForm kind="project" />}
         >
-          Register a local repository, then create a worktree or connect an
-          existing checkout. Secrets can be managed independently.
+          Add a Git repository to get started.
         </Empty>
       ) : (
         <>
@@ -79,12 +75,11 @@ export function Dashboard() {
               <small>{serviceTotal} recorded services</small>
             </Link>
             <Link to="?focus=attention" className="overview-metric">
-              <span>Environments needing attention</span>
+              <span>Needs attention</span>
               <strong className="metric-warning">{attention.length}</strong>
-              <small>Checkout, configuration, services or latest command</small>
             </Link>
             <Link to="/environments" className="overview-metric">
-              <span>Registered environments</span>
+              <span>Environments</span>
               <strong>{data.taskenvs.length}</strong>
               <small>
                 {available} available · {data.taskenvs.length - available}{" "}
@@ -97,11 +92,8 @@ export function Dashboard() {
               className="overview-section"
               aria-labelledby="service-distribution"
             >
-              <h2 id="service-distribution">Service status by project</h2>
-              <p className="muted small">
-                Current recorded state. Select a project to inspect its
-                checkouts.
-              </p>
+              <h2 id="service-distribution">Services</h2>
+              <p className="muted small">Recorded states by project.</p>
               <div className="service-distribution">
                 {projects.map((project) => {
                   let offset = 0;
@@ -171,10 +163,7 @@ export function Dashboard() {
                   ))}
               </ul>
               {!serviceTotal && (
-                <p className="muted small">
-                  No services recorded yet. Projects without services remain
-                  available below.
-                </p>
+                <p className="muted small">No services recorded yet.</p>
               )}
             </section>
             <section
@@ -182,7 +171,7 @@ export function Dashboard() {
               aria-labelledby="attention-queue"
             >
               <div className="overview-section-heading">
-                <h2 id="attention-queue">Environment focus</h2>
+                <h2 id="attention-queue">Activity</h2>
                 <span className="muted small">{queue.length} environments</span>
               </div>
               <div
@@ -238,13 +227,12 @@ export function Dashboard() {
                   <Link
                     to={`/environments${focus === "all" ? "" : `?status=${focus}`}`}
                   >
-                    View all {queue.length} environments <ArrowRight />
+                    Show all <ArrowRight />
                   </Link>
                 </Button>
               )}
               <p className="muted small overview-footnote">
-                Service state and command outcomes are separate. An environment
-                can be running and need attention at the same time.
+                Running environments can still need attention.
               </p>
             </section>
           </div>
@@ -256,7 +244,7 @@ export function Dashboard() {
               <h2 id="project-overview">Projects</h2>
               <Button asChild variant="ghost" size="sm">
                 <Link to="/projects">
-                  Project configuration <ArrowRight />
+                  All projects <ArrowRight />
                 </Link>
               </Button>
             </div>
@@ -276,8 +264,8 @@ export function Dashboard() {
                   </span>
                   <span className="muted small">
                     {project.tasks.length
-                      ? `${project.tasks.length} environments · ${present} available · ${project.tasks.length - present} unavailable`
-                      : "Registered · no connected checkouts"}
+                      ? `${project.tasks.length} environment${project.tasks.length === 1 ? "" : "s"}${present < project.tasks.length ? ` · ${project.tasks.length - present} unavailable` : ""}`
+                      : "No environments"}
                   </span>
                   <ArrowRight size={16} />
                 </Link>

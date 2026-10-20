@@ -994,13 +994,39 @@ nav a svg {
   display: flex;
   align-items: center;
   gap: 7px;
-  flex: 1;
+  flex-shrink: 0;
   min-width: 0;
   text-align: left;
   padding: 9px 6px;
   border-radius: 5px;
   font-size: 13px;
   font-weight: 600;
+}
+.tree-project-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+  padding: 9px 4px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.tree-project-link:hover,
+.tree-project-link[aria-current="page"] {
+  background: var(--accent);
+}
+.tree-project-link span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-project-link svg {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  color: var(--muted-foreground);
 }
 .tree-project-toggle:hover {
   background: var(--muted);
@@ -1011,9 +1037,6 @@ nav a svg {
   height: 15px;
   flex-shrink: 0;
   color: var(--muted-foreground);
-}
-.tree-project-toggle span {
-  overflow-wrap: anywhere;
 }
 .tree-children {
   border-left: 1px solid var(--border);
@@ -1113,10 +1136,20 @@ nav a svg {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.project-checkout-path {
-  display: block;
+.project-summary {
   margin: -12px 0 24px;
   overflow-wrap: anywhere;
+}
+.project-details {
+  margin-top: 10px;
+}
+.project-details summary {
+  cursor: pointer;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.project-details dl {
+  margin-block: 12px;
 }
 .checkout-choices {
   display: grid;
@@ -1139,6 +1172,14 @@ nav a svg {
   font-size: 12px;
   font-weight: 400;
   margin-top: 5px;
+}
+.form-options summary {
+  cursor: pointer;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.form-options label {
+  margin-top: 12px;
 }
 .secret-reference {
   margin-top: 9px;
@@ -1382,6 +1423,40 @@ nav a svg {
   }
 }
 @media (max-width: 720px) {
+  .secret-table,
+  .secret-table tbody,
+  .secret-table tr,
+  .secret-table td {
+    display: block;
+    width: 100%;
+  }
+  .secret-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .secret-table tr {
+    padding: 16px;
+  }
+  .secret-table td {
+    padding: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .secret-table td + td {
+    margin-top: 12px;
+  }
+  .secret-table td:last-child {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .secret-reference pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
   .overview-metrics {
     grid-template-columns: 1fr;
   }
@@ -1429,6 +1504,7 @@ nav a svg {
   }
   .tree-checkout,
   .tree-project-toggle,
+  .tree-project-link,
   .tree-view-all {
     min-height: 44px;
   }

@@ -1,7 +1,7 @@
 # Local console
 
 The Console is Lodex's optional browser interface for the task environments you
-use with a coding agent. Inspect checkouts, command results and service logs after
+use with a coding agent. Inspect environments, command results and service logs after
 your agent uses the CLI, or operate those same environments yourself. The Console
 shares the CLI's management database and Python core; history retrieval uses the
 CLI or MCP. Both workflows are available without the Console.
@@ -50,28 +50,46 @@ below for in-progress commands.
 ## Navigate and operate
 
 Overview is the default page. It shows current service counts by project,
-environments needing attention, and checkout availability. Service states and
+environments needing attention, and worktree availability. Service states and
 command outcomes remain separate: a running environment can also need attention.
-Attention includes unavailable checkouts, invalid configuration, failed/unknown
+Attention includes unavailable worktrees, invalid configuration, failed/unknown
 services, and a latest command with a failed, interrupted or unknown outcome.
 Charts count recorded services, including stopped, transitional, unknown and legacy
 external records; they do not infer unrecorded services or historical trends.
 
-The sidebar keeps Overview, the project/checkout tree and shared Secrets available
-on every page. Open a checkout directly from its project. Each expanded project
-previews up to six entries, prioritizing the main checkout, selected checkout,
+The sidebar keeps Overview, the project/environment tree and shared Secrets available
+on every page. Open an environment directly from its project. Each expanded project
+previews up to six entries, prioritizing the main worktree, selected environment,
 attention, and running services. Search covers all registered paths, branches,
-project names and IDs, including entries outside that preview. View all checkouts
+project IDs and environment IDs, including entries outside that preview. Show all
 opens the complete searchable/filterable list, with eight entries per page and
 pagination preserved in the URL. Unreadable branches fall back to a readable
-directory name or an unavailable-checkout label; the stable ID remains in details.
+directory name or an unavailable-worktree label; the stable ID remains in details.
 
-Each project row's plus button offers a new worktree or connecting an existing
-checkout. Connecting registers an existing main checkout or worktree from the same
-local repository in place. Project configuration remains available from Overview
-and the project-filtered checkout page, with registration, configuration sources,
-worktree creation and existing-checkout controls. Registration does not implicitly
-create, prepare or start an environment.
+Each project's plus button opens **Add environment**, offering **New worktree**
+or **Use existing**. The latter registers an environment for an existing
+main or linked Git worktree from the same local repository, without copying code.
+Registration does not implicitly prepare or start an environment.
+
+Click a project name to open its environment list; the chevron only expands or
+collapses the sidebar tree. The page combines the list with its source worktree
+path and **Details**, which reveals the configuration source. There is no separate
+information page or duplicate actions menu. Show all appears when the tree has
+more than six results. Source information remains read-only.
+
+Project pages use `/environments?project=PROJECT_ID`; older `/projects/PROJECT_ID`
+links redirect there. Labels omit context already supplied by the page: the tree
+heading is **Projects**, and **+ Environment** in an environment list opens
+**Add environment**. Breadcrumbs show the project and environment directly,
+without an intermediate Environments level.
+Optional form settings are under **Options**. Full definitions remain in the
+terminology reference rather than being repeated beside every control.
+
+The [shared terminology](management.md#terminology) distinguishes **Environment**
+(Lodex's taskenv registration), **worktree** (the Git directory) and environment
+variables. Creating or attaching a worktree adds an environment. **Remove worktree**
+deletes the owned directory while retaining the record; **Unregister**
+removes the registration while retaining files and services.
 
 Open an environment for Services, Operations, Configuration, Resources, and
 Cleanup & removal. Services keeps process state, URLs, start/stop and logs together;
@@ -89,7 +107,7 @@ reloads using browser local storage for that origin (scheme, host and port).
 Reuse `--port 8765` and the same host to retain the choice across server restarts;
 a different origin starts with System unless it already has a saved preference.
 When storage is unavailable, switching still works for the current page.
-`Checkout available` means the directory is present, not that preparation or
+`Available` means the directory is present, not that preparation or
 service startup succeeded. The current branch and commit are observed at inspection
 time; they do not determine taskenv identity. Missing or invalid configuration is
 shown without hiding previously recorded services or resources.
@@ -104,7 +122,7 @@ The Secrets page operates independently of projects. Values are sent in request
 bodies, cleared from the form after submission and never returned. The local
 management SQLite database stores values in plaintext under private permissions;
 updating a shared name affects the next command/start/export, not running processes.
-Replace value selects the stored name and focuses an empty input, without reading
+**Replace** selects the stored name and focuses an empty input, without reading
 its stored value. Each reference can expand to a TOML example distinguishing the
 application's environment variable name from the shared storage name.
 
@@ -117,10 +135,11 @@ a worker still finishing: inspect before explicitly retrying. There is no durabl
 queue, automatic continuation or automatic retry. Managed long services are
 independent of the console and remain accessible through a new CLI caller.
 
-Remove first shows the checkout path, Git status, services and known resources.
-Removal retains the registry record for inspection; forget it separately when no
-longer needed. Force removal is a separate unchecked choice; Git and external/main-checkout
-protections remain in the core. Forget removes registration without deleting
+Remove first shows the worktree path, Git status, services and known resources.
+Removal retains the registry record for inspection; use **Unregister** separately
+when no longer needed. Force removal is a separate unchecked choice. Core retains
+Git protections and prevents removal of attached or main worktrees.
+Unregister removes registration without deleting
 services, resources or shared secrets. Cleanup executes the repository's command
 and does not implicitly stop services or delete a worktree.
 
