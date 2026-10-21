@@ -6,6 +6,10 @@ default_permissions = "lodex-worker"
 [permissions.lodex-worker]
 extends = ":workspace"
 
+[permissions.lodex-worker.filesystem]
+# Shared uv package cache; confirm the effective path with `uv cache dir`.
+"~/.cache/uv" = "write"
+
 [permissions.lodex-worker.network]
 enabled = false
 

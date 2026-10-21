@@ -15,6 +15,8 @@ extends = ":workspace"
 
 [permissions.lodex-manager.filesystem]
 "/REPLACE_WITH_LODEX_HOME" = "write"
+# Shared uv package cache; confirm the effective path with `uv cache dir`.
+"~/.cache/uv" = "write"
 
 [permissions.lodex-manager.filesystem.":workspace_roots"]
 ".git" = "write"

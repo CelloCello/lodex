@@ -37,8 +37,15 @@ The intended division is:
 | Lodex state and lifecycle | Create, prepare, run, inspect, stop, clean up | Report needs to manager |
 | Herdr control | Launch and observe agents | No session-control access |
 | Shared Git metadata | Perform authorized Git writes | Read status/diffs |
+| Shared uv package cache | Read/write; coordinate maintenance | Read/write through uv |
 
-Prepare dependencies and task-specific ports, data stores, temp/cache locations
+Both Codex templates grant write access to `~/.cache/uv` for shared package
+caching. Confirm the effective path with `uv cache dir` in the intended command
+environment and adapt only that cache grant if the path differs. See
+[Codex setup](references/codex.md) for overrides and validation. Workers use uv
+normally; leave cache cleanup to the manager and never edit cache internals.
+
+Prepare dependencies and task-specific ports, data stores, temp/output locations
 before dispatch. Read each checkout's recipe and scripts: different directories
 or ports alone do not isolate databases, queues, shared caches or external
 services. A permission profile does not automatically constrain MCP tools,

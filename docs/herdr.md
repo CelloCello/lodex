@@ -105,6 +105,15 @@ The manager needs access to the source repo, necessary Git metadata, central
 Lodex state and the Herdr socket. The Lodex root may contain other projects'
 records and plaintext secrets; confirm that management scope first.
 
+Both templates also grant write access to the shared uv package cache at
+`~/.cache/uv`. Confirm `uv cache dir` in the intended command environments and
+adapt that one grant if an existing override selects another path. Each checkout
+keeps its own virtual environment. Ordinary uv commands then use the shared cache
+without recipe changes or per-command/pane `UV_CACHE_DIR` settings. Workers leave
+cache cleanup to the manager; the manager coordinates maintenance when other uv
+commands are stopped. This exception permits writes to cache artifacts used by
+other tasks, so choose task-specific caches if workers must not have that scope.
+
 The manager template itself allows only the specified Herdr socket and does not
 pre-allow public network destinations. Inspect inherited network rules, then
 allow dependency hosts or local services as required by the project.
@@ -225,8 +234,9 @@ services as the manager. Skip steps that are undefined or unnecessary.
 Workers have no command network access by default, so prepare dependencies
 before dispatch.
 
-Use task-specific ports, temp/cache locations and test data. Different checkouts
-or ports do not isolate databases, queues or external services. See
+Use task-specific ports, temp/output locations and test data, with the shared uv
+cache exception configured above. Different checkouts or ports do not isolate
+databases, queues or external services. See
 [environment configuration](management.md#version-1-configuration).
 
 ### Open a pane and explicitly select the worker configuration

@@ -47,6 +47,14 @@ as valid TOML, including backslashes where necessary. Show both rendered files
 and the exact launch commands for confirmation before installation or changes.
 Installing the Lodex skill copies these assets only; it does not install profiles.
 
+Both templates include `"~/.cache/uv" = "write"` in their role's filesystem
+table. This is an explicit shared-cache exception to the worker's checkout/temp
+write boundary. Run `uv cache dir` in the intended manager and worker command
+environments before setup; `UV_CACHE_DIR`, `XDG_CACHE_HOME`, uv configuration or
+CLI flags may select another path. Adapt the grant to that observed cache root,
+not the whole `~/.cache` directory. An override to a task-specific cache is a
+different setup choice; do not silently reset it or keep unnecessary grants.
+
 ## Adapt the boundary
 
 - Start the manager at the source repo, not a parent containing unrelated repos.
@@ -63,9 +71,20 @@ Installing the Lodex skill copies these assets only; it does not install profile
   directory, Lodex root or the taskenv parent as writable roots. Preserve inherited
   `.git`, `.codex`, `.agents` and `.aws` protections. `:workspace` also permits
   system temp writes and broad reads; this is not a confidentiality boundary or
-  a separate OS/container. Prefer per-task temporary/cache/output locations. If
-  shared temp access is unacceptable, adapt and validate explicit restrictions
+  a separate OS/container. Beyond checkout/temp writes, the worker template
+  deliberately permits the reviewed shared uv cache. Use task-specific locations
+  for other caches, temporary files and output. If shared temp access is
+  unacceptable, adapt and validate explicit restrictions
   with a task-specific writable temp path before promising isolation.
+- Share uv's package cache while keeping each checkout's virtual environment
+  separate. With the shared-cache grant, ordinary manager and worker uv commands
+  need no `UV_CACHE_DIR` injection through recipes, pane env or command prefixes
+  when uv resolves to the granted path. Cache writes are not restricted to safe
+  uv operations by the filesystem grant: a worker can also alter shared artifacts.
+  Use task-specific caches when that wider write scope is unacceptable. Workers
+  must not clean/prune the shared cache or edit its internals. The manager
+  coordinates maintenance through uv when other uv commands are stopped; uv
+  0.6.6 does not support concurrent cleanup. See [uv cache safety](https://docs.astral.sh/uv/concepts/cache/#cache-safety).
 - Worker `approval_policy = "never"` keeps denied shell operations from waiting
   for interactive approval; it does not grant access or prevent all user questions.
   Workers report missing capabilities to the manager. Prepare dependencies first.
@@ -154,6 +173,8 @@ Verify these outcomes, keeping manager and worker results separate:
 | Worker writes a fixture in a sibling checkout or central state | Denied |
 | Worker writes shared Git metadata or controls the Herdr socket | Denied |
 | Worker uses an alternate execution tool | Unavailable or separately constrained |
+| Manager and worker resolve `uv cache dir` to the reviewed shared cache | Same granted path |
+| Manager and worker initialize that cache via `uv run --no-sync ruff --version` in a prepared Python checkout | Allowed |
 | Manager reads Herdr state and runs an authorized Lodex operation | Allowed |
 | Worker runs the agreed direct tests with task-specific inputs | Allowed |
 
