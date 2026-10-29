@@ -96,9 +96,15 @@ def start(
             "url": url,
             "state": "starting",
             "observed_at": now(),
+            "stop_timeout": spec.get("stop_timeout", STOP_GRACE_SECONDS),
         }
         check_command(Path(task["path"]), spec, config)
         argv = command_argv(spec, values, known)
+        ready_argv = (
+            command_argv({"argv": spec["ready_argv"]}, values, known)
+            if "ready_argv" in spec
+            else None
+        )
         ready_port = int(values[spec["ready_port"]]) if "ready_port" in spec else None
         if ready_port is not None:
             with socket.socket() as probe:
@@ -120,7 +126,9 @@ def start(
             "env": process_env(values),
             "secrets": known,
             "ready_port": ready_port,
+            "ready_argv": ready_argv,
             "ready_timeout": spec.get("ready_timeout", 10),
+            "stop_timeout": record["stop_timeout"],
         }
         # Bootstrap using the installed package path, independent of target cwd/PYTHONPATH.
         bootstrap = (
@@ -138,7 +146,7 @@ def start(
             assert supervisor.stdin is not None
             supervisor.stdin.write(json.dumps(payload).encode())
             supervisor.stdin.close()
-            deadline = time.monotonic() + payload["ready_timeout"] + STOP_GRACE_SECONDS + 2
+            deadline = time.monotonic() + payload["ready_timeout"] + record["stop_timeout"] + 3
             while time.monotonic() < deadline:
                 if (directory / "status.json").exists():
                     record.update(read_json(directory / "status.json"))
@@ -173,7 +181,7 @@ def stop(registry: Registry, task_id: str, service: str) -> dict[str, Any]:
         if record["state"] in ("stopped", "exited", "failed"):
             return record
         control(Path(record["directory"]), "stop")
-        deadline = time.monotonic() + STOP_GRACE_SECONDS + 2
+        deadline = time.monotonic() + record.get("stop_timeout", STOP_GRACE_SECONDS) + 3
         while time.monotonic() < deadline:
             status = read_json(Path(record["directory"]) / "status.json")
             if status["state"] in ("stopped", "exited", "failed"):

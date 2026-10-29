@@ -33,6 +33,9 @@ def supervise(payload: dict[str, Any]) -> None:
     token = payload["token"]
     redactor = LogRedactor(payload["secrets"])
     child: subprocess.Popen[bytes] | None = None
+    probe: subprocess.Popen[bytes] | None = None
+    probe_deadline = 0.0
+    next_probe = 0.0
     requested_stop = False
     stop_deadline: float | None = None
     final_state = "stopped"
@@ -42,11 +45,17 @@ def supervise(payload: dict[str, Any]) -> None:
         write_private(directory / "status.json", json.dumps(status))
 
     def begin_stop(state: str) -> None:
-        nonlocal stop_deadline, final_state
+        nonlocal stop_deadline, final_state, probe
         if stop_deadline is None:
+            if probe is not None:
+                # Readiness has no role during shutdown. Keep the leader unreaped
+                # until its whole group is killed, just as on a probe timeout.
+                signal_group(probe, signal.SIGKILL)
+                probe.wait()
+                probe = None
             if child is not None:
                 signal_group(child, signal.SIGTERM)
-            stop_deadline = time.monotonic() + STOP_GRACE_SECONDS
+            stop_deadline = time.monotonic() + payload.get("stop_timeout", STOP_GRACE_SECONDS)
             final_state = state
             status["state"] = "stopping"
             save()
@@ -74,6 +83,7 @@ def supervise(payload: dict[str, Any]) -> None:
         fd = os.open(directory / "output.log", os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
         with os.fdopen(fd, "wb", buffering=0) as log:
             try:
+                launched_at = now()
                 child = subprocess.Popen(
                     payload["argv"],
                     cwd=payload["cwd"],
@@ -88,6 +98,7 @@ def supervise(payload: dict[str, Any]) -> None:
                 selector.register(child.stdout, selectors.EVENT_READ, "log")
                 status["pid"] = child.pid
                 ready_port = payload.get("ready_port")
+                ready_argv = payload.get("ready_argv")
                 deadline = time.monotonic() + payload["ready_timeout"]
                 ready_after = time.monotonic() + 0.15
                 save()
@@ -119,7 +130,11 @@ def supervise(payload: dict[str, Any]) -> None:
                     elif stop_deadline is None and exited_without_reaping(child.pid):
                         begin_stop("failed" if status["state"] == "starting" else "exited")
                     elif status["state"] == "starting":
-                        ready = ready_port is None and time.monotonic() >= ready_after
+                        ready = (
+                            ready_port is None
+                            and not ready_argv
+                            and time.monotonic() >= ready_after
+                        )
                         if ready_port is not None:
                             try:
                                 with socket.create_connection(
@@ -128,6 +143,33 @@ def supervise(payload: dict[str, Any]) -> None:
                                     ready = True
                             except OSError:
                                 pass
+                        if ready_argv:
+                            current = time.monotonic()
+                            if probe is not None:
+                                exited = exited_without_reaping(probe.pid)
+                                if exited or current >= probe_deadline:
+                                    # Retain the leader PID while killing probe descendants.
+                                    signal_group(probe, signal.SIGKILL)
+                                    ready = exited and probe.wait() == 0
+                                    if not exited:
+                                        probe.wait()
+                                    probe = None
+                                    next_probe = current + 0.2
+                            elif current >= next_probe:
+                                probe = subprocess.Popen(
+                                    ready_argv,
+                                    cwd=payload["cwd"],
+                                    env={
+                                        **payload["env"],
+                                        "LODEX_SERVICE_PID": str(child.pid),
+                                        "LODEX_SERVICE_STARTED_AT": launched_at,
+                                    },
+                                    stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                    start_new_session=True,
+                                )
+                                probe_deadline = min(deadline, current + 1)
                         if ready:
                             status["state"] = "running"
                             save()
@@ -158,6 +200,9 @@ def supervise(payload: dict[str, Any]) -> None:
                 status["state"] = "failed"
                 status["error"] = "service_launch_failed"
             finally:
+                if probe is not None:
+                    signal_group(probe, signal.SIGKILL)
+                    probe.wait()
                 if child is not None and child.stdout is not None:
                     child.stdout.close()
                 log.write(redactor.feed(b"", final=True))

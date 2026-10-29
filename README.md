@@ -236,8 +236,11 @@ Store the value independently with `lodex secret set app-dev-token` (hidden
 input). The name is `app-dev-token`; `API_TOKEN` is the variable the application
 receives. Each subsequent command/service start or `env export` resolves the
 current stored value; already-running processes are not updated automatically.
-`env show` does not read an existing `.env`. `env export` generates one when
-needed; Lodex-managed processes receive values directly without that file.
+Lodex passes resolved settings directly to commands and services; configuration
+files are optional and project-managed. `env export` can write these inputs as
+dotenv; `env show` does not read application files. See the
+[service settings](docs/management.md#commands-and-services) and
+[integration update rules](docs/management.md#updating-integrations) for details.
 
 ### Session history
 

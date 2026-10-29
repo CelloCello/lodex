@@ -13,11 +13,15 @@ lodex service logs NAME --target ID --json
 lodex service stop NAME --target ID --json
 ```
 
-Report actual readiness, URL (if any), observation time and failures. Running without a readiness port means only that the worker survived startup; it does not prove application readiness. Services survive caller exit. Reopening a conversation does not imply starting them again. A changed project.toml affects the next operation and does not automatically restart anything. Stop uses the saved service handle even when configuration or checkout disappears.
+Inspect before starting, including after switching callers; CLI/Console exit does
+not stop services. `ready_port` checks TCP; `ready_argv` exit 0 means startup-ready.
+Without either, running means only that the process survived startup. Readiness
+is not monitored continuously. Report readiness, URL, observation time and failures.
 
-For unknown handles or startup interruption, inspect before considering another start. Do not kill a PID merely because a saved port or PID matches. External endpoints cannot be stopped through Lodex. Missing secret/config/script errors need resolution before retry; never expose secret values in argv or output. Use `lodex cleanup --target ID --json` for repo cleanup separately, then preview worktree removal. Never directly edit the management database.
-
-The optional `lodex console` uses the same records and operations. Closing its
-page or process does not stop managed long services. After switching callers,
-inspect existing service and operation records before taking another action;
-an interrupted/unknown command is not automatically retried.
+Configuration changes affect future starts. Stop uses the saved handle and
+launch-time `stop_timeout` even without the checkout; older records default to
+three seconds. Allow that grace before declaring stop unknown. Inspect interrupted
+starts/unknown handles before retrying; never kill a process from a saved PID/port
+alone or edit the management DB. Resolve missing configuration, scripts or secrets
+before retrying; keep secret values out of argv/output. Repo cleanup and worktree
+removal are separate operations; Lodex cannot stop external endpoints.

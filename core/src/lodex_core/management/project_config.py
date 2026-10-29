@@ -85,7 +85,15 @@ def load(path: Path) -> dict[str, Any]:
             fields = (
                 {"argv", "scripts"}
                 if section == "commands"
-                else {"argv", "scripts", "url", "ready_port", "ready_timeout"}
+                else {
+                    "argv",
+                    "scripts",
+                    "url",
+                    "ready_port",
+                    "ready_argv",
+                    "ready_timeout",
+                    "stop_timeout",
+                }
             )
             if set(spec) - fields:
                 raise ManagementError("invalid_config", f"Unknown fields in {section}.{key}")
@@ -108,6 +116,21 @@ def load(path: Path) -> dict[str, Any]:
                 not isinstance(spec["ready_port"], str) or spec["ready_port"] not in data["ports"]
             ):
                 raise ManagementError("invalid_config", "ready_port must name a configured port")
+            if "ready_argv" in spec:
+                probe = spec["ready_argv"]
+                if (
+                    not isinstance(probe, list)
+                    or not probe
+                    or any(not isinstance(arg, str) or not arg or "\x00" in arg for arg in probe)
+                    or "ready_port" in spec
+                ):
+                    raise ManagementError(
+                        "invalid_config",
+                        "ready_argv needs a string array and cannot combine with ready_port",
+                    )
+            stop_timeout = spec.get("stop_timeout", 3)
+            if type(stop_timeout) not in (int, float) or not 0 < stop_timeout <= 300:
+                raise ManagementError("invalid_config", "stop_timeout must be >0 and <=300")
             timeout = spec.get("ready_timeout", 10)
             if type(timeout) not in (int, float) or not 0 < timeout <= 300:
                 raise ManagementError("invalid_config", "ready_timeout must be >0 and <=300")

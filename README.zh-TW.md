@@ -222,8 +222,10 @@ API_TOKEN = "secret:app-dev-token"
 之後每次啟動命令或服務，或執行 `env export` 時，都會解析當下儲存的值；
 已執行中的程序不會自動更新。
 
-`env show` 不會讀取既有的 `.env`。需要 dotenv 檔案時，請使用 `env export` 產生；
-由 Lodex 啟動的程序會直接收到環境變數，不需要透過該檔案。
+Lodex 將解析後的設定直接傳給命令與服務；設定檔由專案自行選擇與管理。
+`env export` 可將這些輸入匯出為 dotenv；`env show` 不會讀取應用程式設定檔。
+詳細契約見[服務設定](docs/management.md#commands-and-services)與
+[整合更新規則](docs/management.md#updating-integrations)。
 
 ### 對話歷史
 

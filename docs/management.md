@@ -116,9 +116,17 @@ registered for inspection and a later `worktree attach` retry.
 Each worktree owns `.lodex/project.toml`. An existing file wins, even if invalid
 (invalid content reports an error and is not replaced). Create, attach and prepare
 copy only a missing file from the explicit `--config` or registered source. The
-source may be tracked, untracked or ignored. Copies are independent; no .env,
-scripts, Git index or ignore rules are copied/changed. Read operations do not supply
-configuration. The copied recipe may require scripts absent from an old commit.
+source may be tracked, untracked or ignored. This configuration fallback copies
+only TOML; Git checkout supplies tracked files normally. Read operations do not
+supply configuration. Required scripts may be absent from an old commit.
+
+### Updating integrations
+
+Updating the registered source does not refresh an existing taskenv's recipe or
+scripts. Apply updates explicitly, preserving local configuration and ownership
+records. Use a CLI/Console build supporting the recipe's fields, and restart the
+Console after updating Core. Follow the repository's preparation instructions;
+running services retain their launch configuration until stopped and started again.
 
 Keep new Lodex-specific integration scripts in `.lodex/scripts/` and supporting
 files such as Compose configuration in `.lodex/`; existing project scripts can be
@@ -127,7 +135,7 @@ developer or an authorized agent creates the integration files during initial
 setup, optionally guided by the project-setup Skill. Commit the TOML, scripts and
 supporting files so new worktrees inherit them from their starting ref. Exclude
 runtime records with narrow rules in `.lodex/.gitignore`, keeping the recipe files
-trackable; keep real secrets in the central secret store. The CLI does not generate
+trackable; keep real secrets out of tracked files. The CLI does not generate
 integration scripts or copy the whole `.lodex/` directory.
 
 ## Command reference
@@ -164,7 +172,7 @@ names, without a `secret:` prefix, and need no project, worktree or `--target`.
 | Command | Target | Purpose |
 | --- | --- | --- |
 | `prepare [--config PATH]` | Yes | Supply missing configuration if needed and run `commands.prepare` in the foreground. |
-| `run NAME` | Yes | Run `commands.NAME` in the foreground and record its outcome. |
+| `run NAME` | Yes | Execute the repository-defined `commands.NAME.argv` in the foreground and record its outcome. |
 | `cleanup` | Yes | Run `commands.cleanup`; resource cleanup depends on the repository's recipe. |
 | `service start NAME` | Yes | Start a configured process and check its configured readiness condition. |
 | `service stop NAME` | Yes | Stop a managed service using its saved process identity. |
@@ -220,6 +228,12 @@ scripts = [".lodex/scripts/web.py"]
 ready_port = "PORT"
 ready_timeout = 10
 url = "http://127.0.0.1:${PORT}"
+[services.worker]
+argv = ["python3", ".lodex/scripts/worker.py"]
+scripts = [".lodex/scripts/worker.py", ".lodex/scripts/worker_ready.py"]
+ready_argv = ["python3", ".lodex/scripts/worker_ready.py"]
+ready_timeout = 120
+stop_timeout = 45
 ```
 
 Scripts above are examples and must exist in the target repo. Unknown fields and
@@ -284,6 +298,10 @@ unignored secret output and handwritten/modified existing files. A generated fil
 can be refreshed only while its content matches Lodex's saved digest. No Git ignore
 changes are implicit. An existing source `.env` is never copied.
 
+Application configuration files are optional; their loading and synchronization
+are project-defined. Lodex passes resolved `[env]`/`[secrets]` inputs to processes;
+`env export` only writes those resolved inputs.
+
 ## Commands and services
 
 ```sh
@@ -324,28 +342,44 @@ on a stored PID/port alone. CLI exit or page closure does not stop services. The
 is no central daemon, automatic restart, boot startup or persistent scheduler.
 If the supervisor itself disappears, its control handle is unknown; inspect/manual
 recovery is required. Do not daemonize or detach inside a managed service command.
-Stopping sends SIGTERM to the whole group and grants a three-second grace period,
-then sends SIGKILL to any remaining members. Status is `stopping` during this period;
-inspect and stop remain available. The supervisor retains the unreaped leader until
-the final signal so its process group ID cannot be reused. The same group cleanup
-runs after an early leader exit or readiness timeout before reporting a terminal state.
+Stopping sends SIGTERM to the whole group, waits the full `stop_timeout`, then
+sends SIGKILL to remaining members. Status stays `stopping`; inspection remains
+available, but concurrent writes can return `busy` while another caller holds the
+taskenv lock. The supervisor keeps the leader unreaped until the final signal
+to prevent process-group ID reuse, including after early exit or readiness failure.
+Choose enough grace for application shutdown and teardown. This setting applies
+only to services; repo commands retain their fixed three-second interrupt grace.
+
+| Service field | Default | Meaning |
+| --- | --- | --- |
+| `ready_port` | Unset | A name from `[ports]`; mutually exclusive with `ready_argv`. |
+| `ready_argv` | Unset | A nonempty argument array for a startup probe; exit 0 means ready, other exits retry. |
+| `ready_timeout` | 10 seconds | Overall readiness budget; a number greater than 0 and at most 300. |
+| `stop_timeout` | 3 seconds | Grace before SIGKILL; a number greater than 0 and at most 300, saved at launch. |
 
 `ready_port` checks TCP availability after launch; it does not prove full app
-health or database isolation. A worker without it is running after surviving the
-initial startup interval and needs no URL. Every service requires `argv` and
-represents a process Lodex can start and stop. File edits do not trigger a Lodex
-restart. New operations use current configuration;
-stop uses saved service identity even when its config item or worktree is gone.
+health or isolation. `ready_argv` executes directly in the service cwd/environment,
+with the same interpolation and secret-in-argv protection as service argv.
+Probe-only environment variables `LODEX_SERVICE_PID` and `LODEX_SERVICE_STARTED_AT`
+identify the current launch; they are not TOML placeholders. Use them to reject
+stale readiness records. Probes run one at a time, have no stdin, discard output
+and retry with a one-second attempt limit. Their process groups are killed on
+completion, timeout or service stop. Keep probes read-only and declare their
+dependencies in `scripts`.
 
-Third-party APIs and shared dependencies use connection settings in `[env]` and
-credentials in `[secrets]`; the application connects to them directly. To give
-each taskenv its own substitute, configure a mock server as a normal service with
-an allocated port. Shared DB/Redis isolation depends on the project's database,
-schema or key-prefix settings. Resource reports still use `scope=shared` or
-`scope=exclusive` independently of service management.
+Readiness checks run only during startup. With neither check, `running` means
+the process survived the initial startup interval. A failed `service start` also
+waits for shutdown, so it can take `ready_timeout` plus `stop_timeout` and control
+overhead. New starts read current configuration; stop uses the saved handle and
+timeout even when configuration or checkout is gone.
+
+Third-party APIs and shared dependencies are application connections; only managed
+processes belong in `[services]`. A per-taskenv substitute can be a normal mock
+service with an allocated port. Application isolation is project-defined;
+resource reports describe shared/exclusive scope independently of service management.
 
 The `services.NAME.external` field is no longer accepted, including `false`.
-Remove a URL-only service entry and move its connection settings to env/secrets;
+Remove a URL-only service entry and configure the connection in the application;
 for a managed process, remove the field and supply `argv`. Lodex reports an error
 with guidance and does not rewrite the TOML.
 

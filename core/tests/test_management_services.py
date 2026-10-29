@@ -190,3 +190,162 @@ def test_readiness_timeout_and_process_group(registry: Registry, repo: Path) -> 
             services.stop(registry, task["id"], "group")
         except ManagementError:
             pass
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "ready_argv=[]",
+        "ready_argv=[1]",
+        'ready_argv=["true"]\nready_port="PORT"',
+        "stop_timeout=0",
+        "stop_timeout=true",
+        "stop_timeout=301",
+    ],
+)
+def test_invalid_readiness_or_stop_configuration(repo: Path, extra: str) -> None:
+    (repo / CONFIG).write_text(
+        'schema_version=1\n[ports]\nPORT=0\n[services.job]\nargv=["true"]\n' + extra
+    )
+    with pytest.raises(ManagementError, match=r"ready_argv|stop_timeout"):
+        load(repo / CONFIG)
+
+
+def test_probe_waits_for_current_child_and_does_not_log_probe_output(
+    registry: Registry, repo: Path
+) -> None:
+    worker = (
+        "import os,time;from pathlib import Path;time.sleep(.3);"
+        "Path('ready').write_text(str(os.getpid()));time.sleep(30)"
+    )
+    probe = (
+        "import os;from pathlib import Path;print('private probe output');"
+        "raise SystemExit(0 if Path('ready').read_text()==os.environ['LODEX_SERVICE_PID'] else 1)"
+    )
+    (repo / CONFIG).write_text(
+        "schema_version=1\n[services.job]\n"
+        f"argv={json.dumps([sys.executable, '-c', worker])}\n"
+        f"ready_argv={json.dumps([sys.executable, '-c', probe])}\n"
+        "ready_timeout=3\nstop_timeout=0.2\n"
+    )
+    task = register(registry, repo)
+    started = time.monotonic()
+    record = services.start(registry, task, "job")
+    try:
+        assert time.monotonic() - started >= 0.3
+        assert record["pid"] == int((repo / "ready").read_text())
+        assert "private probe output" not in services.logs(registry, task["id"], "job")["tail"]
+    finally:
+        services.stop(registry, task["id"], "job")
+
+
+def test_hanging_probe_is_bounded_and_killed_with_startup(registry: Registry, repo: Path) -> None:
+    probe = (
+        "import os,time;from pathlib import Path;"
+        "Path('probe-pid').write_text(str(os.getpid()));time.sleep(60)"
+    )
+    (repo / CONFIG).write_text(
+        "schema_version=1\n[services.job]\n"
+        f"argv={json.dumps([sys.executable, '-c', 'import time;time.sleep(60)'])}\n"
+        f"ready_argv={json.dumps([sys.executable, '-c', probe])}\n"
+        "ready_timeout=0.3\nstop_timeout=0.2\n"
+    )
+    task = register(registry, repo)
+    started = time.monotonic()
+    with pytest.raises(ManagementError, match="failed"):
+        services.start(registry, task, "job")
+    assert time.monotonic() - started < 3
+    pid = int((repo / "probe-pid").read_text())
+    with pytest.raises(ProcessLookupError):
+        os.killpg(pid, 0)
+
+
+def test_configured_stop_timeout_allows_graceful_shutdown(registry: Registry, repo: Path) -> None:
+    worker = (
+        "import signal,time;from pathlib import Path\n"
+        "def stop(*_):\n time.sleep(3.2)\n Path('finished').touch()\n raise SystemExit(0)\n"
+        "signal.signal(signal.SIGTERM,stop)\ntime.sleep(60)\n"
+    )
+    (repo / CONFIG).write_text(
+        "schema_version=1\n[services.job]\n"
+        f"argv={json.dumps([sys.executable, '-c', worker])}\nstop_timeout=4\n"
+    )
+    task = register(registry, repo)
+    record = services.start(registry, task, "job")
+    assert record["stop_timeout"] == 4
+    stopped = services.stop(registry, task["id"], "job")
+    assert stopped["state"] == "stopped" and stopped["exit_code"] == 0
+    assert (repo / "finished").exists()
+
+
+@pytest.mark.parametrize("stop_requested", [False, True])
+def test_stopping_cancels_hanging_readiness_probe(tmp_path: Path, stop_requested: bool) -> None:
+    worker = "import time;time.sleep(60)" if stop_requested else "import time;time.sleep(.4)"
+    payload = {
+        "directory": str(tmp_path),
+        "cwd": str(tmp_path),
+        "token": "fixture-token",
+        "env": dict(os.environ),
+        "secrets": [],
+        "argv": [sys.executable, "-c", worker],
+        "ready_argv": [
+            sys.executable,
+            "-c",
+            (
+                "import os,time;from pathlib import Path;"
+                "Path('probe-pid').write_text(str(os.getpid()));time.sleep(60)"
+            ),
+        ],
+        "ready_timeout": 10,
+        "stop_timeout": 2,
+    }
+    supervisor = subprocess.Popen(
+        [sys.executable, "-m", "lodex_core.management.runner"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        assert supervisor.stdin is not None
+        supervisor.stdin.write(json.dumps(payload).encode())
+        supervisor.stdin.close()
+        deadline = time.monotonic() + 3
+        while not (tmp_path / "probe-pid").exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.02)
+        pid = int((tmp_path / "probe-pid").read_text())
+        if stop_requested:
+            supervisor.terminate()
+        deadline = time.monotonic() + 1.4
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            assert time.monotonic() < deadline, "Probe survived the stop transition"
+            time.sleep(0.02)
+        while json.loads((tmp_path / "status.json").read_text())["state"] != "stopping":
+            assert time.monotonic() < deadline
+            time.sleep(0.02)
+        supervisor.wait(timeout=4)
+        assert supervisor.returncode == 0
+    finally:
+        if supervisor.poll() is None:
+            supervisor.terminate()
+            supervisor.wait(timeout=5)
+
+
+def test_probe_rejects_secret_interpolation_before_launch(registry: Registry, repo: Path) -> None:
+    (repo / CONFIG).write_text(
+        'schema_version=1\n[secrets]\nTOKEN="secret:test"\n[services.job]\n'
+        'argv=["python3","-c","pass"]\nready_argv=["echo","${TOKEN}"]\n'
+    )
+    task = register(registry, repo)
+
+    class Provider:
+        def get(self, reference: str) -> str:
+            return "synthetic-token"
+
+    with pytest.raises(ManagementError, match="never argv"):
+        services.start(registry, task, "job", Provider())
+    assert services.list_services(registry, task["id"]) == []
