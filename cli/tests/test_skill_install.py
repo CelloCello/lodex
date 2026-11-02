@@ -19,6 +19,7 @@ def assert_skill_contents(target: Path, name: str) -> None:
             Path(relative)
             for relative in (
                 "references/codex.md",
+                "references/service-delegation.md",
                 "assets/lodex-manager.config.toml",
                 "assets/lodex-worker.config.toml",
             )

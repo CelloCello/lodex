@@ -41,9 +41,10 @@ def inputs(
     *,
     secrets: bool = True,
     persist: bool = True,
+    configuration: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, str], list[str]]:
     root = require_present(task)
-    config = load(root / CONFIG)
+    config = load(root / CONFIG) if configuration is None else configuration
     if persist:
         with registry.lock("registry"):
             allocate(registry, task, config)

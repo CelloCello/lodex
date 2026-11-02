@@ -179,6 +179,9 @@ names, without a `secret:` prefix, and need no project, worktree or `--target`.
 | `service list` | Yes | List saved service records and refresh their state. |
 | `service inspect NAME` | Yes | Inspect one saved service record and refresh its state. |
 | `service logs NAME` | Yes | Read the recent log tail; does not continuously follow output. |
+| `service delegate --service NAME` | Yes | Serve a foreground delegation for explicitly selected services in one taskenv. |
+| `service revoke DELEGATION_ID` | No | Revoke worker service control; keep services available for manager takeover. |
+| `service retry-acks NAME` | Yes | Manager: retry retained terminal ACKs for this service without stopping its current launch. |
 | `operation list` | Yes | List recorded repository command runs for the environment. |
 | `operation inspect OPERATION_ID` | No | Inspect a run's state, exit information and recorded resources. |
 | `operation logs OPERATION_ID` | No | Read a recorded run's recent log tail. |
@@ -370,8 +373,17 @@ dependencies in `scripts`.
 Readiness checks run only during startup. With neither check, `running` means
 the process survived the initial startup interval. A failed `service start` also
 waits for shutdown, so it can take `ready_timeout` plus `stop_timeout` and control
-overhead. New starts read current configuration; stop uses the saved handle and
-timeout even when configuration or checkout is gone.
+overhead. Manager starts read current configuration; manager stop uses the saved
+handle and timeout even when configuration or checkout is gone.
+
+Workers can receive [taskenv-scoped service delegation](service-delegation.md)
+without management DB access. The manager authorizes named services; workers
+execute them in their own sandbox. Delegation does not change agent permissions.
+Delegated operations require the original checkout identity; recipe changes need
+a new grant. Terminal results are collected through the saved control handle and
+recorded before acknowledging supervisor exit. See the delegation guide for
+read-only queries and recovery limits. Pending ACKs survive restarts with warnings;
+managers can explicitly retry them with `service retry-acks NAME`.
 
 Third-party APIs and shared dependencies are application connections; only managed
 processes belong in `[services]`. A per-taskenv substitute can be a normal mock

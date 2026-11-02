@@ -241,6 +241,8 @@ files are optional and project-managed. `env export` can write these inputs as
 dotenv; `env show` does not read application files. See the
 [service settings](docs/management.md#commands-and-services) and
 [integration update rules](docs/management.md#updating-integrations) for details.
+For restricted workers, [delegate named services](docs/service-delegation.md)
+in one taskenv without granting management DB access.
 
 ### Session history
 

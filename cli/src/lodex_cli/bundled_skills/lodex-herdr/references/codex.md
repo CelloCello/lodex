@@ -85,6 +85,11 @@ different setup choice; do not silently reset it or keep unnecessary grants.
   must not clean/prune the shared cache or edit its internals. The manager
   coordinates maintenance through uv when other uv commands are stopped; uv
   0.6.6 does not support concurrent cleanup. See [uv cache safety](https://docs.astral.sh/uv/concepts/cache/#cache-safety).
+- Optional [service delegation](service-delegation.md) needs separately reviewed
+  access to its returned runtime root and Unix sockets. Protect central state and
+  other grants from reads as well as writes; keep access to the assigned checkout.
+  The baseline template does not enable this. A helper's `--allow-unix-socket`
+  probe is not proof that an agent loaded equivalent profile settings.
 - Worker `approval_policy = "never"` keeps denied shell operations from waiting
   for interactive approval; it does not grant access or prevent all user questions.
   Workers report missing capabilities to the manager. Prepare dependencies first.

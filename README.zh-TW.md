@@ -226,6 +226,8 @@ Lodex 將解析後的設定直接傳給命令與服務；設定檔由專案自�
 `env export` 可將這些輸入匯出為 dotenv；`env show` 不會讀取應用程式設定檔。
 詳細契約見[服務設定](docs/management.md#commands-and-services)與
 [整合更新規則](docs/management.md#updating-integrations)。
+受限 worker 可透過[服務委派](docs/service-delegation.md)控制指定 taskenv 的具名服務，
+無須取得管理資料庫的存取權。
 
 ### 對話歷史
 

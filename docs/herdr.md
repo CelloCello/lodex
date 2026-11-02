@@ -19,7 +19,7 @@ their own launch arguments and permission settings.
 | --- | --- | --- |
 | Working directory | Source repo, with plans and the coordinating conversation | The checkout Lodex created for the task |
 | Responsibilities | Split work, prepare environments, manage services, delegate, verify and integrate | Edit assigned files, run agreed direct tests and report results |
-| Lodex and Herdr | Manage environment lifecycle; launch and observe agents | Report environment or permission needs to the manager |
+| Lodex and Herdr | Manage lifecycle, delegate services, launch and observe agents | Control explicitly delegated services; report other environment needs |
 | Git | Commit and integrate as authorized | Read status and diffs; leave Git writes to the manager |
 | Suggested Codex config name | `lodex-manager` | `lodex-worker` |
 
@@ -229,8 +229,10 @@ The variables `taskenv_id`, `taskenv_path`, `pane_id` and `task_prompt` below mu
 be filled from observed results and the assignment; these snippets are not a
 complete script to paste unchanged.
 Creating a worktree does not run preparation commands. Read that checkout's
-recipe, then run necessary `prepare` commands, install dependencies and start
-services as the manager. Skip steps that are undefined or unnecessary.
+recipe, then run necessary `prepare` commands and install dependencies as the
+manager. Start services here when they will remain manager-controlled; use the
+optional delegation below for worker-controlled services. Skip steps that are
+undefined or unnecessary.
 Workers have no command network access by default, so prepare dependencies
 before dispatch.
 
@@ -273,8 +275,9 @@ Task: fix mobile navigation wrapping; edit only related files in this checkout.
 References: <applicable rules, plan paths or a focused context excerpt>.
 Acceptance: no navigation overlap at 390px; desktop behavior remains correct.
 Direct tests: <specific commands and checks confirmed to work in this environment>.
-Report missing dependencies, services or permissions with the operation and error
-to the manager. Leave Lodex, Herdr and Git writes to the manager.
+Use service delegation only for this taskenv and its authorized service names.
+Report missing dependencies or permissions with the operation and error. Leave
+other Lodex operations, Herdr control and Git writes to the manager.
 When finished, stop editing and report changed files, a diff summary, test
 commands and results, and unresolved issues.
 ```
@@ -296,6 +299,11 @@ Workers report missing capabilities to the manager. Arrange authorized
 dependencies or configuration corrections; do not repeatedly send the same failing
 instruction or answer approval/question dialogs on the user's behalf without
 authorization.
+
+For worker-controlled service lifecycle, use [service delegation](service-delegation.md).
+It requires reviewed per-taskenv runtime/socket permissions; the baseline worker
+profile does not grant them. Do not open the whole Lodex root or run worker code
+with manager permissions. Grant creation and profile changes remain separate actions.
 
 For parallel work, use a distinct taskenv, branch, pane and agent name for each
 task, and keep their mapping in the manager's context. Sequence dependent work;

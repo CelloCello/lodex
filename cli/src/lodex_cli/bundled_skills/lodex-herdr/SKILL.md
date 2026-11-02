@@ -34,7 +34,7 @@ The intended division is:
 | --- | --- | --- |
 | Source checkout and plans | Coordinate and maintain authorized notes | Read references |
 | Taskenv files | Prepare and inspect | Write only its assigned checkout |
-| Lodex state and lifecycle | Create, prepare, run, inspect, stop, clean up | Report needs to manager |
+| Lodex state and lifecycle | Create, prepare, delegate services, verify, clean up | Control explicitly delegated services; report other needs |
 | Herdr control | Launch and observe agents | No session-control access |
 | Shared Git metadata | Perform authorized Git writes | Read status/diffs |
 | Shared uv package cache | Read/write; coordinate maintenance | Read/write through uv |
@@ -71,6 +71,8 @@ it implicitly or guess how to answer an agent's interactive UI.
    absolute checkout path. Do not create a second worktree through Herdr or the
    coding agent. Prepare required scripts/dependencies and services through Lodex;
    an existing taskenv or a copied recipe does not prove they are ready.
+   For worker-controlled services, follow [service delegation](references/service-delegation.md).
+   Creating a grant does not approve or install extra worker permissions.
 3. Inspect Herdr layout, then open a pane with that exact checkout as its `--cwd`,
    preserving user focus. Use the returned pane ID. Reconcile existing agents
    before retrying a partially completed launch; never launch two writers into
@@ -94,8 +96,9 @@ it implicitly or guess how to answer an agent's interactive UI.
    source-plan paths or a focused context excerpt, direct test commands and expected
    return information. Source notes remain references unless writing is authorized.
    Workers do not inherit the manager's conversation; give them the needed context.
-   State that Lodex lifecycle, Herdr control, Git writes and unavailable resources
-   go back to the manager. The worker should report a denied operation with its
+   Provide any approved service delegation separately; other Lodex lifecycle,
+   Herdr control, Git writes and unavailable resources go back to the manager.
+   The worker should report a denied operation with its
    error, not try another execution channel to get around the boundary.
 
 For parallel tasks, repeat with distinct taskenvs, branches, pane IDs and live
