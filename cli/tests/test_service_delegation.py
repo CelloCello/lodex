@@ -45,7 +45,7 @@ def delegated(repo: Path) -> Iterator[dict[str, Any]]:
     )
     worktrees.git(repo, "add", "job.py", str(CONFIG))
     worktrees.git(repo, "commit", "-qm", "fixture services")
-    with tempfile.TemporaryDirectory(prefix="ldc-", dir="/private/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="ldc-", dir=Path("/tmp").resolve()) as directory:
         store = Registry(Path(directory) / "state")
         processes: list[subprocess.Popen[str]] = []
         infos = []

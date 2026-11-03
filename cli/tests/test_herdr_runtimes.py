@@ -39,7 +39,7 @@ def runtime(request: pytest.FixtureRequest) -> Iterator[tuple[str, dict[str, str
     binary = shutil.which("herdr" if kind == "tui" else "hc")
     if binary is None:
         pytest.skip(f"{kind} runtime is not installed")
-    with tempfile.TemporaryDirectory(prefix="ldr-", dir="/private/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="ldr-", dir=Path("/tmp").resolve()) as directory:
         root = Path(directory)
         environment = {
             key: value for key, value in os.environ.items() if not key.startswith(("HC_", "HERDR_"))

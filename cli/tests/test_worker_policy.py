@@ -25,6 +25,15 @@ from .test_service_delegation import delegated as delegated
 
 @pytest.fixture
 def draft(delegated: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    if shutil.which("codex") is None:
+        # Policy/guard fixtures replace agent_argv before execution. Real Codex
+        # integration tests require the installed CLI separately.
+        tools = tmp_path / "tools"
+        tools.mkdir()
+        codex = tools / "codex"
+        codex.write_text("#!/bin/sh\necho 'Unexpected policy-only Codex placeholder' >&2\nexit 1\n")
+        codex.chmod(0o700)
+        monkeypatch.setenv("PATH", str(tools) + os.pathsep + os.environ.get("PATH", ""))
     home = tmp_path / "codex"
     home.mkdir()
     (home / "fixture.config.toml").write_text('approval_policy="never"\n')
@@ -204,7 +213,9 @@ def test_new_grant_generates_new_routes_without_old_runtime_or_peer_changes(
 
 
 @pytest.mark.skipif(
-    os.environ.get("LODEX_TEST_SANDBOX") != "1" or sys.platform != "darwin",
+    os.environ.get("LODEX_TEST_SANDBOX") != "1"
+    or sys.platform != "darwin"
+    or shutil.which("codex") is None,
     reason="Opt-in disposable Codex sandbox test",
 )
 def test_rendered_policy_routes_own_services_without_helper_socket_flags(
@@ -235,7 +246,9 @@ print('own-service-and-temp-allowed')
 
 
 @pytest.mark.skipif(
-    os.environ.get("LODEX_TEST_SANDBOX") != "1" or sys.platform != "darwin",
+    os.environ.get("LODEX_TEST_SANDBOX") != "1"
+    or sys.platform != "darwin"
+    or shutil.which("codex") is None,
     reason="Opt-in disposable Codex sandbox test",
 )
 def test_restricted_cleanup_collects_results_without_central_or_peer_access(
@@ -305,7 +318,9 @@ Path(os.environ['LODEX_RESULT_FILE']).write_text(json.dumps({{'resources':[],'ur
 
 
 @pytest.mark.skipif(
-    os.environ.get("LODEX_TEST_SANDBOX") != "1" or sys.platform != "darwin",
+    os.environ.get("LODEX_TEST_SANDBOX") != "1"
+    or sys.platform != "darwin"
+    or shutil.which("codex") is None,
     reason="Opt-in disposable Codex sandbox test",
 )
 @pytest.mark.parametrize("injection", ["NODE_OPTIONS", "PATH"])

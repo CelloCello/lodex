@@ -31,7 +31,8 @@ def grants(repo: Path) -> Iterator[tuple[Registry, Controller, Controller]]:
         f"ready_argv={json.dumps([sys.executable, '-c', 'pass'])}\n"
         'ready_timeout=3\nstop_timeout=0.1\n[services.other]\nargv=["true"]\n'
     )
-    with tempfile.TemporaryDirectory(prefix="ldg-", dir="/private/tmp") as directory:
+    # Keep Unix socket paths short on both Linux and macOS.
+    with tempfile.TemporaryDirectory(prefix="ldg-", dir=Path("/tmp").resolve()) as directory:
         registry = Registry(Path(directory) / "state")
         controllers: list[Controller] = []
         try:

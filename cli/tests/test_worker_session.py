@@ -451,6 +451,9 @@ def test_missing_uuid_alone_never_authorizes_fresh_retry(
 
 
 @pytest.mark.parametrize("kind", ["tui", "core"])
+@pytest.mark.skipif(
+    shutil.which("codex") is None, reason="Installed Codex required for native parser integration"
+)
 def test_actual_codex_argument_error_can_retry_without_a_native_uuid(
     delegated: Any, draft: Any, tmp_path: Path, kind: str
 ) -> None:
