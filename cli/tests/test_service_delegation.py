@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,10 @@ def delegated(repo: Path) -> Iterator[dict[str, Any]]:
         'scripts=["job.py"]\n'
         f"ready_argv={json.dumps([sys.executable, '-c', 'pass'])}\n"
         'ready_timeout=5\nstop_timeout=0.2\n[services.other]\nargv=["true"]\n'
+        "[commands.prepare]\n"
+        f"argv={json.dumps([sys.executable, '-c', 'pass'])}\n"
+        "[commands.cleanup]\n"
+        f"argv={json.dumps([sys.executable, '-c', 'pass'])}\n"
     )
     worktrees.git(repo, "add", "job.py", str(CONFIG))
     worktrees.git(repo, "commit", "-qm", "fixture services")
@@ -46,45 +51,51 @@ def delegated(repo: Path) -> Iterator[dict[str, Any]]:
         infos = []
         tasks = []
         environment = {**os.environ, "LODEX_HOME": str(store.root), "PYTHONDONTWRITEBYTECODE": "1"}
+
+        def delegate(task: dict[str, Any]) -> dict[str, Any]:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "lodex_cli.main",
+                    "service",
+                    "delegate",
+                    "--target",
+                    task["id"],
+                    "--service",
+                    "job",
+                    "--json",
+                ],
+                cwd=repo,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            processes.append(process)
+            assert process.stdout is not None
+            with selectors.DefaultSelector() as selector:
+                selector.register(process.stdout, selectors.EVENT_READ)
+                assert selector.select(timeout=8), "Delegation did not report readiness"
+            info = json.loads(process.stdout.readline())
+            assert info["ok"], info
+            result: dict[str, Any] = info["result"]
+            return result
+
         try:
             worktrees.project_add(store, "fixture", repo, None)
             SQLiteSecrets(store).set("secret:fixture", "synthetic-delegation-token")
             for name in ("a", "b"):
                 task = worktrees.create(store, "fixture", "HEAD", "cli-delegate-" + name)
                 tasks.append(task)
-                process = subprocess.Popen(
-                    [
-                        sys.executable,
-                        "-m",
-                        "lodex_cli.main",
-                        "service",
-                        "delegate",
-                        "--target",
-                        task["id"],
-                        "--service",
-                        "job",
-                        "--json",
-                    ],
-                    cwd=repo,
-                    env=environment,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-                processes.append(process)
-                assert process.stdout is not None
-                with selectors.DefaultSelector() as selector:
-                    selector.register(process.stdout, selectors.EVENT_READ)
-                    assert selector.select(timeout=8), "Delegation did not report readiness"
-                info = json.loads(process.stdout.readline())
-                assert info["ok"], info
-                infos.append(info["result"])
+                infos.append(delegate(task))
             yield {
                 "store": store,
                 "tasks": tasks,
                 "infos": infos,
                 "processes": processes,
                 "env": environment,
+                "delegate": delegate,
             }
         finally:
             for process in processes:
@@ -151,6 +162,42 @@ def test_cli_worker_runs_own_service_without_opening_the_registry(
     stopped = runner.invoke(app, ["service", "stop", "job", "--json"])
     assert stopped.exit_code == 0, stopped.output
     assert json.loads(stopped.stdout)["result"]["state"] == "stopped"
+
+
+def test_worker_restarts_modified_application_without_registry_or_recipe_change(
+    delegated: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    info, peer_info = delegated["infos"]
+    client = Client(Path(info["credential_file"]))
+    peer_client = Client(Path(peer_info["credential_file"]))
+    peer = peer_client.perform("start", "job", None)
+    # The handoff and existing credential already describe the environment.
+    assert client.credential["taskenv"] == info["taskenv"]
+    assert client.credential["path"] == delegated["tasks"][0]["path"]
+    assert client.credential["runtime_root"] == info["runtime_root"]
+    assert info["services"] == ["job"]
+    monkeypatch.setattr(
+        Registry, "__init__", lambda *_a, **_k: pytest.fail("Worker opened central registry")
+    )
+    first = client.perform("start", "job", None)
+    assert client.perform("stop", "job", None)["state"] == "stopped"
+    root = Path(client.credential["path"])
+    (root / "job.py").write_text(
+        "import time\nprint('updated-app' * 8,flush=True)\ntime.sleep(60)\n"
+    )
+    second = client.perform("start", "job", None)
+    assert second["delegated"]["launch"] != first["delegated"]["launch"]
+    deadline = time.monotonic() + 3
+    while "updated-app" not in client.perform("logs", "job", None)["tail"]:
+        assert time.monotonic() < deadline, "Replacement application did not report its version"
+        time.sleep(0.02)
+    assert peer_client.request("inspect", "job")["pid"] == peer["pid"]
+    assert client.perform("stop", "job", None)["state"] == "stopped"
+    recipe = root / CONFIG
+    recipe.write_text(recipe.read_text() + '\n[env]\nAPP_MODE="changed"\n')
+    with pytest.raises(ManagementError) as rejected:
+        client.perform("start", "job", None)
+    assert rejected.value.code == "delegation_config_changed"
 
 
 def test_manager_cli_retries_retained_acks_without_stopping_replacement(
@@ -325,7 +372,10 @@ def test_cli_revoke_and_controller_exit_leave_manager_in_control(
     os.environ.get("LODEX_TEST_SANDBOX") != "1" or sys.platform != "darwin",
     reason="Opt-in disposable macOS Codex sandbox test",
 )
-def test_actual_worker_sandbox_and_service_children_cannot_cross_taskenv(delegated: Any) -> None:
+@pytest.mark.parametrize("socket_source", ["helper", "profile"])
+def test_actual_worker_sandbox_and_service_children_cannot_cross_taskenv(
+    delegated: Any, socket_source: str
+) -> None:
     codex = shutil.which("codex")
     if codex is None:
         pytest.skip("Codex sandbox helper is not installed")
@@ -391,10 +441,22 @@ time.sleep(60)
         "permissions.lodex-fixture.filesystem=" + rules,
         "permissions.lodex-fixture.network.enabled=false",
     ]
+    if socket_source == "profile":
+        overrides.extend(
+            ["features.network_proxy=true", "permissions.lodex-fixture.network.enabled=true"]
+        )
+        overrides.append(
+            "permissions.lodex-fixture.network.unix_sockets={"
+            + ",".join(json.dumps(path) + '="allow"' for path in (a["socket"], a["runtime_root"]))
+            + "}"
+        )
     command = [codex, "sandbox", "--permission-profile", "lodex-fixture", "--cd", task_a["path"]]
     for override in overrides:
         command.extend(["-c", override])
-    command.extend(["--allow-unix-socket", a["socket"], "--allow-unix-socket", a["runtime_root"]])
+    if socket_source == "helper":
+        command.extend(
+            ["--allow-unix-socket", a["socket"], "--allow-unix-socket", a["runtime_root"]]
+        )
     script = """import json,os,subprocess,sys,time
 from pathlib import Path
 target,other=sys.argv[1:]

@@ -1,7 +1,12 @@
 ---
 name: lodex-services
-description: Start, inspect, read logs and stop Lodex taskenv services across callers. Use for local service lifecycle management with existing project configuration.
+description: Start, inspect, read logs and stop Lodex-managed taskenv services in management or delegated worker sessions. Use existing project configuration for local service lifecycle operations.
 ---
+
+Operate services the taskenv owns and is authorized to stop/restart. Shared DBs
+or other external dependencies may be connection settings owned elsewhere; follow
+the project's sharing contract and leave their lifecycle with that owner. A
+detached project-owned process is not automatically controlled by service stop.
 
 With `LODEX_SERVICE_DELEGATION` set, skip `lodex context`: it needs registry access.
 Use an authorized service name from the assignment and recipe.
@@ -21,10 +26,22 @@ lodex service logs NAME --target ID --json
 lodex service stop NAME --target ID --json
 ```
 
+Restart is stop then start; confirm the stop result before starting again. Ordinary
+application code edits can use the existing grant. Recipe changes need management
+review and a new grant, not broader worker permissions.
+
 Delegation only covers its taskenv/services. The worker launches services/probes
 under its own permissions without opening the registry. Report denied/unavailable
 delegation to the manager; never change grants, unset delegation or switch profiles
 to bypass it. Other Lodex management operations remain undelegated.
+In the A/B/C workflow, report an unavailable controller or changed grant to A for
+coordinated renewal and native-session resume with new permissions; do not start
+another writer or replay an uncertain request. The controller belongs to active
+taskenv use, not one agent turn. A completed turn does not revoke it or stop services.
+
+Manager starts execute repo code with caller permissions. For worker-modified code,
+retain worker-side execution or an equivalent restricted runner; a manager start
+is not a fallback for a denied delegated start.
 
 Inspect before starting, including after switching callers; CLI/Console exit does
 not stop services. `ready_port` checks TCP; `ready_argv` exit 0 means startup-ready.

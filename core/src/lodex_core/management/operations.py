@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import os
 import selectors
 import signal
+import stat
 import subprocess
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
-from lodex_core.management.common import ManagementError, now, private_dir, read_json
+from lodex_core.management import settings
+from lodex_core.management.common import ManagementError, now, private_dir
 from lodex_core.management.environment import (
     LogRedactor,
     SecretProvider,
@@ -27,9 +31,9 @@ from lodex_core.management.processes import (
     exited_without_reaping,
     signal_group,
 )
-from lodex_core.management.project_config import check_command, supply
+from lodex_core.management.project_config import CONFIG, check_command, digest, load, supply
 from lodex_core.management.store import Registry
-from lodex_core.management.worktrees import require_present
+from lodex_core.management.worktrees import git, require_present
 
 
 def inspect_operation(registry: Registry, record: dict[str, Any]) -> dict[str, Any]:
@@ -41,11 +45,26 @@ def inspect_operation(registry: Registry, record: dict[str, Any]) -> dict[str, A
 
 
 def result_data(path: Path, known: list[str]) -> dict[str, Any]:
-    if not path.exists():
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
         return {"resources": [], "urls": []}
-    if path.stat().st_size > 1024 * 1024:
-        raise ManagementError("invalid_result", "Repo result exceeds 1 MiB")
-    raw = read_json(path)
+    except OSError as exc:
+        raise ManagementError(
+            "invalid_result", "Repo result must be a private regular file"
+        ) from exc
+    with os.fdopen(descriptor, "rb") as stream:
+        observed = os.fstat(stream.fileno())
+        if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
+            raise ManagementError("invalid_result", "Repo result must be a private regular file")
+        if observed.st_size > 1024 * 1024:
+            raise ManagementError("invalid_result", "Repo result exceeds 1 MiB")
+        try:
+            raw = json.loads(stream.read(1024 * 1024 + 1))
+        except (ValueError, RecursionError) as exc:
+            raise ManagementError("invalid_result", "Cannot read valid repo result") from exc
+    if not isinstance(raw, dict):
+        raise ManagementError("invalid_result", "Repo result must be an object")
     if set(raw) - {"resources", "urls"}:
         raise ManagementError("invalid_result", "Repo result accepts only resources and urls")
     resources = raw.setdefault("resources", [])
@@ -93,6 +112,10 @@ def run(
     command: str,
     provider: SecretProvider | None = None,
     source: Path | None = None,
+    *,
+    execution: Callable[[Path], list[str]] | None = None,
+    execution_env: dict[str, str] | None = None,
+    approved_secret_refs: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     with registry.lock(task["id"]), ExitStack() as held:
         registry.reload_task(task)
@@ -102,7 +125,12 @@ def run(
             provenance = supply(root, source or Path(project["source"]))
             if provenance["method"] == "copied":
                 task["config_source"] = provenance
-        config, values, known = inputs(registry, task, provider)
+        configuration = load(root / CONFIG)
+        if approved_secret_refs is not None and configuration["secrets"] != approved_secret_refs:
+            raise ManagementError(
+                "execution_scope", "Secret references changed; review a new worker policy"
+            )
+        config, values, known = inputs(registry, task, provider, configuration=configuration)
         spec = config["commands"].get(command)
         if spec is None:
             raise ManagementError(
@@ -111,6 +139,10 @@ def run(
             )
         check_command(root, spec, config)
         argv = command_argv(spec, values, known)
+        delivery = config["taskenv"].get("env_file") if command == "prepare" else None
+        if delivery is not None:
+            settings.export_resolved(registry, task, delivery, values, known)
+        checkout_commit = git(root, "rev-parse", "HEAD") if command == "prepare" else None
         operation_id = uuid.uuid4().hex
         held.enter_context(registry.lock(f"op-{operation_id}"))
         directory = registry.root / "operations" / operation_id
@@ -143,15 +175,32 @@ def run(
             try:
                 for sig in previous:
                     signal.signal(sig, interrupted)
+                environment = {**process_env(values), **(execution_env or {})}
+                # Repo inputs reach the command only after the wrapper establishes
+                # its sandbox. Loader variables must not affect that outer process.
+                launcher_environment = (
+                    {**process_env({}), **(execution_env or {})}
+                    if execution is not None
+                    else environment
+                )
                 child = subprocess.Popen(
-                    argv,
+                    execution(result_path) if execution is not None else argv,
                     cwd=root,
-                    env=process_env(values),
-                    stdin=subprocess.DEVNULL,
+                    env=launcher_environment,
+                    stdin=subprocess.PIPE if execution is not None else subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                 )
+                if execution is not None:
+                    assert child.stdin is not None
+                    try:
+                        # Private pipe, never secret-bearing argv or staging files.
+                        child.stdin.write(
+                            json.dumps({"argv": argv, "environment": environment}).encode()
+                        )
+                    finally:
+                        child.stdin.close()
                 assert child.stdout is not None
                 os.set_blocking(child.stdout.fileno(), False)
                 with selectors.DefaultSelector() as selector:
@@ -204,6 +253,21 @@ def run(
                 log.write(redactor.feed(b"", final=True))
                 result_path.unlink(missing_ok=True)
                 record["observed_at"] = now()
+                if command == "prepare" and record["state"] == "succeeded":
+                    record["handoff"] = {
+                        "version": 1,
+                        "taskenv": task["id"],
+                        "path": str(root),
+                        "project": task["project"],
+                        "base_commit": task.get("base_commit"),
+                        "checkout_commit": checkout_commit,
+                        "configuration": str(root / CONFIG),
+                        "configuration_digest": digest(config),
+                        "env_file": str(root / delivery) if delivery is not None else None,
+                        "configured_services": sorted(config["services"]),
+                        "secret_refs": config["secrets"],
+                        "prepare_operation": operation_id,
+                    }
                 registry.put("operation", record)
         return record
 

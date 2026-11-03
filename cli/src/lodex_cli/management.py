@@ -145,6 +145,48 @@ def worktree_attach(
         return management_result(ctx, worktrees.attach(store, project, path, config), as_json)
 
 
+@worktree_app.command("worker-config")
+def worker_config(
+    ctx: typer.Context,
+    prepare_operation: Annotated[str, typer.Option(help="Successful prepare operation ID.")],
+    profile: Annotated[str, typer.Option(help="Reviewed Codex config profile name.")],
+    uv_cache: Annotated[Path, typer.Option(help="Observed absolute shared uv cache path.")],
+    target: Target = None,
+    delegation: Annotated[str | None, typer.Option(help="Active service delegation ID.")] = None,
+    allow_host: Annotated[
+        list[str] | None, typer.Option(help="Required application host; repeat.")
+    ] = None,
+    deny_socket: Annotated[
+        list[Path] | None, typer.Option(help="Herdr/other control socket; repeat.")
+    ] = None,
+    deny_path: Annotated[
+        list[Path] | None, typer.Option(help="Additional private path to deny; repeat.")
+    ] = None,
+    trust_checkout: Annotated[
+        bool, typer.Option(help="Trust this reviewed checkout for this invocation only.")
+    ] = False,
+    as_json: Json = False,
+) -> int:
+    """Draft per-launch Codex settings; does not install settings or start an agent."""
+    from lodex_cli import worker_policy
+
+    with registry() as store:
+        task = resolve(store, target)
+        result = worker_policy.render(
+            store,
+            task,
+            prepare_operation=prepare_operation,
+            profile=profile,
+            cache=uv_cache,
+            delegation=delegation,
+            hosts=allow_host,
+            control_sockets=deny_socket,
+            denied_paths=deny_path,
+            trust_checkout=trust_checkout,
+        )
+        return management_result(ctx, result, as_json)
+
+
 @worktree_app.command("list")
 def worktree_list(ctx: typer.Context, as_json: Json = False) -> int:
     """List registered environments and their inspection state."""
@@ -214,9 +256,50 @@ def run(ctx: typer.Context, name: str, target: Target = None, as_json: Json = Fa
     return run_operation(ctx, name, target, None, as_json)
 
 
-def cleanup(ctx: typer.Context, target: Target = None, as_json: Json = False) -> int:
-    """Run the repository's cleanup command."""
-    return run_operation(ctx, "cleanup", target, None, as_json)
+def cleanup(
+    ctx: typer.Context,
+    target: Target = None,
+    worker_policy: Annotated[
+        Path | None, typer.Option(help="Protected worker policy for restricted cleanup.")
+    ] = None,
+    as_json: Json = False,
+) -> int:
+    """Run cleanup in caller permissions, or in the selected worker's sandbox."""
+    if worker_policy is None:
+        return run_operation(ctx, "cleanup", target, None, as_json)
+    from lodex_cli import worker_policy as policies
+    from lodex_core.management import operations
+
+    with registry() as store:
+        task = resolve(store, target)
+        policy = policies.read(store, task, worker_policy)
+
+        def execute(result: Path) -> list[str]:
+            # Only this operation's result file is opened beneath central state.
+            # Its parent, records and logs remain inaccessible to checkout code.
+            rule = f"permissions.{policy['permission_profile']}.filesystem=" + policies.toml_value(
+                {**policy["filesystem"], str(result): "write"}
+            )
+            return [
+                *policy["sandbox_argv"],
+                "-c",
+                rule,
+                "--",
+                sys.executable,
+                "-I",
+                "-m",
+                "lodex_cli.cleanup_worker",
+            ]
+
+        result = operations.run(
+            store,
+            task,
+            "cleanup",
+            execution=execute,
+            execution_env={**policy["routes"], **policy["launch_env"]},
+            approved_secret_refs=policy["handoff"]["secret_refs"],
+        )
+        return management_result(ctx, result, as_json, ok=result["state"] == "succeeded")
 
 
 @service_app.command("start")

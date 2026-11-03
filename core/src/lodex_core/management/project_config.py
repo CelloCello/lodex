@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -28,13 +30,27 @@ SKELETON = """schema_version = 1
 """
 
 
+def digest(config: dict[str, Any]) -> str:
+    """Compare resolved recipe structure without reading secret values."""
+    return hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
+
+
 def load(path: Path) -> dict[str, Any]:
     try:
         with path.open("rb") as stream:
             data = tomllib.load(stream)
     except (OSError, ValueError) as exc:
         raise ManagementError("config_unavailable", f"Cannot read valid TOML: {path}") from exc
-    allowed = {"schema_version", "env", "secrets", "ports", "commands", "services", "tools"}
+    allowed = {
+        "schema_version",
+        "env",
+        "secrets",
+        "ports",
+        "commands",
+        "services",
+        "tools",
+        "taskenv",
+    }
     if (
         type(data.get("schema_version")) is not int
         or data["schema_version"] != 1
@@ -45,6 +61,21 @@ def load(path: Path) -> dict[str, Any]:
         value = data.setdefault(section, {})
         if not isinstance(value, dict):
             raise ManagementError("invalid_config", f"{section} must be a table")
+    delivery = data["taskenv"]
+    if set(delivery) - {"env_file"}:
+        raise ManagementError("invalid_config", "taskenv accepts only env_file")
+    if "env_file" in delivery:
+        relative = delivery["env_file"]
+        if (
+            not isinstance(relative, str)
+            or not relative
+            or "\x00" in relative
+            or Path(relative).is_absolute()
+            or ".." in Path(relative).parts
+            or not Path(relative).name
+            or Path(relative).parts[0] in {".git", ".codex", ".agents", ".aws"}
+        ):
+            raise ManagementError("invalid_config", "taskenv.env_file needs a repo-relative file")
     for section in ("env", "secrets", "ports"):
         for key, value in data[section].items():
             if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key) or key.startswith("LODEX_"):

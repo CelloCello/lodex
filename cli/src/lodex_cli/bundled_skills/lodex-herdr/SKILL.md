@@ -1,138 +1,102 @@
 ---
 name: lodex-herdr
-description: Set up or coordinate coding agents in Lodex task environments through Herdr, with explicit manager and worker permissions. Use for the combined Lodex and Herdr workflow, including parallel tasks; not for standalone history search or ordinary worktree management.
+description: Set up or coordinate persistent coding-agent sessions in Lodex task environments through Herdr TUI or herdr-core/App, with scoped service control. Use for the combined workflow and parallel tasks, not standalone history search or ordinary worktree management.
 ---
 
 # Lodex + Herdr
 
-Keep the coordinating conversation in the source checkout. Lodex owns taskenv
-creation, preparation, services, operation records and removal. Herdr owns panes
-and agent processes. Each worker edits one taskenv; the manager keeps plans,
-delegates work and collects results. This skill supplies instructions, not a
-background scheduler or an additional sandbox.
+Keep session A in the source checkout. A prepares taskenvs and coordinates;
+B/C are interactive sessions in distinct Lodex checkouts. The user can work in
+any session and return to A. A completed turn leaves B/C available for follow-up.
+Lodex owns environment identity, configuration and services; Herdr owns terminals;
+the skill connects them. The service controller is a program, not another agent.
 
-## Setup and permissions
+## Select and review setup
 
-Use the agent kind the user selected; do not silently substitute Codex. Inspect
-the installed agent's help and Herdr's supported kinds before choosing launch
-arguments. For a Codex manager or worker, read [Codex setup](references/codex.md)
-and adapt its linked templates. Other agents need their own documented workspace,
-permission and approval settings; Codex flags and templates do not apply to them.
-If those controls cannot express the intended boundary, explain the gap before
-launching work rather than claiming equivalent isolation.
+Use the user's selected runtime and agent. TUI uses `herdr`; core uses `hc`;
+Herdr App presents core terminals. They do not share TUI agent identities. Never
+switch runtimes after an uncertain launch or create a second Herdr-owned worktree.
 
-Check existing setup first. When profiles are missing or unsuitable, present the
-concrete destinations, proposed content/diff and access scope, then obtain user
-confirmation before creating or changing agent configuration. Reuse confirmation
-already given for that exact configuration; approval to install this skill alone
-does not approve changes to agent permissions. Preserve unrelated settings. Do not
-overwrite the upstream Herdr skill or change global defaults to make a task run.
+Read [Codex settings](references/codex.md) for Codex. Other agents need their own
+validated permission/launch contract; `worker-config` currently drafts Codex only.
+Inspect installed help and effective tools. Do not substitute an agent, pin its
+model, replace global defaults or install profiles without the applicable approval.
+Standing approval for a reviewed setup can cover generated paths for subsequent
+tasks within that scope; a new host/tool/root or wider grant needs scoped review.
 
-The intended division is:
+Choose the runtime reference before live control:
 
-| Capability | Manager | Worker |
-| --- | --- | --- |
-| Source checkout and plans | Coordinate and maintain authorized notes | Read references |
-| Taskenv files | Prepare and inspect | Write only its assigned checkout |
-| Lodex state and lifecycle | Create, prepare, delegate services, verify, clean up | Control explicitly delegated services; report other needs |
-| Herdr control | Launch and observe agents | No session-control access |
-| Shared Git metadata | Perform authorized Git writes | Read status/diffs |
-| Shared uv package cache | Read/write; coordinate maintenance | Read/write through uv |
+- [TUI](references/tui.md): requires the actual caller's `HERDR_ENV=1`; preserve focus.
+- [Core and App](references/core.md): explicit local core context and terminal IDs.
 
-Both Codex templates grant write access to `~/.cache/uv` for shared package
-caching. Confirm the effective path with `uv cache dir` in the intended command
-environment and adapt only that cache grant if the path differs. See
-[Codex setup](references/codex.md) for overrides and validation. Workers use uv
-normally; leave cache cleanup to the manager and never edit cache internals.
+Read the upstream runtime skill/current help. Setup and code review can continue
+outside Herdr, but do not inspect/control an unrelated focused user session.
 
-Prepare dependencies and task-specific ports, data stores, temp/output locations
-before dispatch. Read each checkout's recipe and scripts: different directories
-or ports alone do not isolate databases, queues, shared caches or external
-services. A permission profile does not automatically constrain MCP tools,
-browser/computer control, or other execution channels. Check the worker's actual
-available tools as part of setup.
+## Prepare and hand off
 
-## Dispatch from the manager
+1. Resolve project, base ref, task boundary and resource contract. Use Lodex's
+   observed IDs/absolute paths, not branch or pane labels. Use project-setup for
+   missing recipes. Honor the project's existing startup, settings and resource
+   ownership choices: shared DBs/data and project-owned `.env`/secret tools are
+   valid. Preparation must deliver usable settings to the new checkout. Record
+   shared effects and cleanup ownership; per-task DBs and Lodex secret storage are
+   project choices. The shared uv cache is an explicit writable exception, not
+   full isolation; workers do not prune it.
+2. Reuse an appropriate taskenv or create a distinct branch/checkout through
+   Lodex. Keep the returned ID before further work. Run `lodex prepare --target
+   ID --json`; it exports optional `[taskenv] env_file` before the recipe. Only a
+   successful prepare has a handoff. Fix/retry the same ID on failure; never
+   blindly create another checkout or claim its presence means it is ready.
+3. For selected taskenv-owned services, review the recipe and start an independent
+   controller terminal using [service delegation](references/service-delegation.md). Keep
+   its actual runtime handle and returned grant information. No services means
+   no controller is needed. The controller never runs repo code.
+4. Draft `lodex worktree worker-config` with the successful prepare operation,
+   approved config profile, observed uv cache, grant ID and actual control socket
+   paths to deny. Review its filesystem/socket/host/tool scope. It writes a
+   protected policy and returns launch arguments, without installing or applying
+   settings. Check required paths/hosts/tools against the actual worker scope.
+   Report a capability gap if the project's chosen startup method needs broader
+   access; resolve the choice with the user before dependent work. Project startup
+   passing in A does not prove B/C compatibility. Invalid setup fails; do not use
+   manager permissions or Full Access, silently change startup tools, or give a
+   worker broad daemon control as a fallback.
+5. Create a focused task text containing the handoff ID/path/project/base commit,
+   requested result, direct test/config-loading instructions, authorized services,
+   acceptance and return information. Use excerpts if source plans are inaccessible.
+   Do not put secret values or credential tokens in prompts, argv or labels.
+   Workers use their handed-off context; `lodex context` still needs the registry.
+6. Use the chosen runtime reference to launch B/C with the protected policy and
+   task file. Record runtime kind, host/session/socket, actual pane/terminal and
+   native agent session ID when observed. The launch guard prevents a concurrent
+   worker for that taskenv; unknown exits require reconciliation. A command being
+   admitted is not proof the task arrived or effective permissions loaded.
+7. Confirm cwd, applied permissions, tool surface and receipt of the first task
+   before productive work. Report denials and fix the reviewed setup; never use
+   another execution channel to bypass them. Repeat for C with a different taskenv.
 
-For live Herdr operations, first check `test "${HERDR_ENV:-}" = 1`. If false, stop
-session control and explain how to start the manager in a Herdr pane; setup advice
-and configuration drafting can continue outside Herdr. Read the installed Herdr
-skill when available and use `herdr --help` and `herdr agent` for current syntax.
-If the skill is absent, request its setup before live orchestration; do not install
-it implicitly or guess how to answer an agent's interactive UI.
+## Coordinate, continue and finish
 
-1. Resolve the source repo, Lodex project, task scope, agent kind and launch
-   configuration. Reuse established choices. Ask about unresolved task boundaries
-   or shared-resource behavior before dependent work. Use `lodex context --target
-   /absolute/path --json` and inspect explicit IDs; do not infer identity from a
-   branch or pane title. Use `lodex-project-setup` for missing project recipes.
-2. Reuse a suitable existing taskenv, or create the requested one through Lodex.
-   Use `lodex-worktree` or the installed CLI help. Keep the returned taskenv ID and
-   absolute checkout path. Do not create a second worktree through Herdr or the
-   coding agent. Prepare required scripts/dependencies and services through Lodex;
-   an existing taskenv or a copied recipe does not prove they are ready.
-   For worker-controlled services, follow [service delegation](references/service-delegation.md).
-   Creating a grant does not approve or install extra worker permissions.
-3. Inspect Herdr layout, then open a pane with that exact checkout as its `--cwd`,
-   preserving user focus. Use the returned pane ID. Reconcile existing agents
-   before retrying a partially completed launch; never launch two writers into
-   the same taskenv by default.
-4. Start the requested agent in that pane with the selected worker configuration
-   and explicit working directory. Native agent arguments go after Herdr's `--`.
-   For Codex, the default names from the setup reference give this command:
+Use runtime waits/read surfaces and bounded output. A refreshes actual state and
+latest summaries before following up, especially after the user works directly in
+B/C. Sessions do not share conversation memory. A timeout is not proof input was
+lost; inspect before resending. Keep blocked approval/question UIs for the user
+unless the exact response is already authorized.
 
-   ```bash
-   herdr agent start "$agent_name" --kind codex --pane "$pane_id" -- \
-     -p "$worker_profile" -C "$taskenv_path"
-   ```
+B/C use delegated `service start/stop/list/inspect/logs` autonomously. Restart is
+stop then start. Ordinary code edits are allowed; recipe changes require review
+and a new grant. Running processes and old exported settings do not refresh when
+project secrets change. Controller availability follows active taskenv use, not
+A's reasoning turn. Keep controllers outside core's worker-child wait group.
 
-   These shell variables represent observed values, not literal placeholders to
-   send. `worker_profile` is the approved config profile name (normally
-   `lodex-worker`), never the manager profile. Missing/invalid settings are a setup
-   failure: do not omit the profile, add broad writable roots, or disable sandboxing
-   as a retry. A successful Herdr launch proves readiness, not effective permissions.
-5. Confirm the worker's cwd and active configuration before productive dispatch.
-   Include in its prompt the taskenv ID/path, requested change, acceptance criteria,
-   source-plan paths or a focused context excerpt, direct test commands and expected
-   return information. Source notes remain references unless writing is authorized.
-   Workers do not inherit the manager's conversation; give them the needed context.
-   Provide any approved service delegation separately; other Lodex lifecycle,
-   Herdr control, Git writes and unavailable resources go back to the manager.
-   The worker should report a denied operation with its
-   error, not try another execution channel to get around the boundary.
+Follow [lifecycle and recovery](references/lifecycle.md) for replacing a grant,
+stopping the old worker and resuming the same native session with new settings,
+or for explicit cleanup. Neither settled status nor a completed turn authorizes
+revoke, process exit, cleanup, commit, integration or taskenv deletion.
 
-For parallel tasks, repeat with distinct taskenvs, branches, pane IDs and live
-agent names. Record their mapping in the coordinating conversation or the repo's
-existing task record. Separate native agent sessions implement the work; the
-manager remains the user's single coordination conversation.
-
-## Observe and finish
-
-Send work with Herdr's agent prompt interface and use bounded waits. Inspect
-`agent get`/`agent read` on timeout or blocked state before retrying; a timeout
-does not mean the prompt was never delivered. Perform authorized status reads
-using existing permissions. A skill's blocked-UI rule is not a reason to request
-escalation for every read. If access is actually denied, report the operation and
-error; do not assume that a read needs to run outside the sandbox.
-
-Do not answer a worker approval/question dialog without the user's authorization
-for that answer. Treat a worker permission failure as a manager task: arrange an
-authorized dependency or correct a confirmed setup, then continue with the same
-taskenv. Do not repeatedly send the same failing instruction.
-
-Workers run the agreed direct tests and return changed files, diff, results and
-remaining blockers. Confirm the worker has stopped editing before final review,
-verification or integration. The manager inspects changes, including untracked
-files, checks those results and, when appropriate, runs
-`lodex run verify --target ID --json` to record verification. This writes central
-Lodex state. It also executes the checkout's recipe/scripts with the manager's
-execution permissions: inspect relevant changes first, and use a separately
-restricted runner if arbitrary test code must be isolated. Do not describe it as
-running under the worker's sandbox.
-
-Perform commits/integration only within the user's authorized workflow. Stop
-services and run applicable cleanup before Lodex removal; preview removal and
-respect Git/ignored-file protections. Closing a Herdr pane/workspace is separate
-from deleting the taskenv; do not use Herdr worktree removal for a Lodex-owned
-checkout. Report per-task results and distinguish tested behavior from unverified
-permissions or resource isolation.
+Before final review/integration, agree that the worker has stopped editing and
+inspect tracked/untracked changes and tests. `lodex run verify` executes repo code
+with its caller's permissions; it is not automatically the worker's sandbox.
+For explicit teardown, inspect changed cleanup code and use the task-limited
+runner. Preserve checkout/handles after failure. Report actual checks separately
+from unverified agent/tool/network/resource boundaries.

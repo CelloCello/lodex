@@ -33,6 +33,122 @@ def test_prepare_runs_without_services(registry: Registry, repo: Path) -> None:
     assert registry.all("service") == []
 
 
+def test_restricted_operation_passes_project_inputs_only_through_pipe(
+    registry: Registry, repo: Path
+) -> None:
+    (repo / "cleanup.py").write_text(
+        "import os\n"
+        "assert os.environ['PROJECT_ONLY']=='repo input'\n"
+        "assert os.environ['TOKEN']=='synthetic-cleanup-secret'\n"
+        "assert os.environ['TRUSTED_ROUTE']=='reviewed route'\n"
+        "print('repo inputs delivered')\n"
+    )
+    (repo / CONFIG).write_text(
+        'schema_version=1\n[env]\nPROJECT_ONLY="repo input"\n'
+        '[secrets]\nTOKEN="secret:cleanup"\n[commands.cleanup]\nargv='
+        + json.dumps([sys.executable, "cleanup.py"])
+        + "\n"
+    )
+    task = register(registry, repo)
+    SQLiteSecrets(registry).set("secret:cleanup", "synthetic-cleanup-secret")
+    launcher = (
+        "import json,os,sys\n"
+        "assert 'PROJECT_ONLY' not in os.environ\n"
+        "assert 'TOKEN' not in os.environ\n"
+        "assert 'LODEX_RESULT_FILE' not in os.environ\n"
+        "assert os.environ['TRUSTED_ROUTE']=='reviewed route'\n"
+        "payload=json.load(sys.stdin)\n"
+        "os.execvpe(payload['argv'][0],payload['argv'],payload['environment'])\n"
+    )
+    result = operations.run(
+        registry,
+        task,
+        "cleanup",
+        execution=lambda _result: [sys.executable, "-I", "-c", launcher],
+        execution_env={"TRUSTED_ROUTE": "reviewed route"},
+    )
+    assert result["state"] == "succeeded", operations.logs(result)["tail"]
+    assert "repo inputs delivered" in operations.logs(result)["tail"]
+
+
+def test_prepare_delivers_project_env_and_secret_free_handoff_for_two_taskenvs(
+    registry: Registry, repo: Path
+) -> None:
+    (repo / ".gitignore").write_text(".env\n")
+    script = (
+        "import os;from pathlib import Path; "
+        "assert os.environ['TOKEN'] in Path('.env').read_text(); "
+        "Path('prepared').write_text(os.environ['LODEX_TASKENV_ID'])"
+    )
+    (repo / CONFIG).write_text(
+        'schema_version=1\n[taskenv]\nenv_file=".env"\n'
+        '[env]\nDB="app_${LODEX_TASKENV_ID}"\n'
+        '[secrets]\nTOKEN="secret:shared"\n[commands.prepare]\nargv='
+        + json.dumps([sys.executable, "-c", script])
+        + "\n"
+    )
+    worktrees.git(repo, "add", ".gitignore", str(CONFIG))
+    worktrees.git(repo, "commit", "-qm", "taskenv configuration")
+    worktrees.project_add(registry, "fixture", repo, None)
+    provider = SQLiteSecrets(registry)
+    provider.set("secret:shared", "synthetic-shared-value")
+    (repo / ".env").write_text("source handwritten settings")
+    a = worktrees.create(registry, "fixture", "HEAD", "a")
+    b = worktrees.create(registry, "fixture", "HEAD", "b")
+    for task in (a, b):
+        root = Path(task["path"])
+        assert not (root / ".env").exists()
+        result = operations.run(registry, task, "prepare")
+        assert result["state"] == "succeeded"
+        handoff = result["handoff"]
+        assert handoff["taskenv"] == task["id"]
+        assert handoff["path"] == str(root)
+        assert handoff["env_file"] == str(root / ".env")
+        assert handoff["base_commit"] == worktrees.git(repo, "rev-parse", "HEAD")
+        assert handoff["secret_refs"] == {"TOKEN": "secret:shared"}
+        assert "synthetic-shared-value" not in json.dumps(result)
+        assert stat.S_IMODE((root / ".env").stat().st_mode) == 0o600
+        assert f'DB="app_{task["id"]}"' in (root / ".env").read_text()
+        assert (root / "prepared").read_text() == task["id"]
+    snapshot = (Path(b["path"]) / ".env").read_text()
+    provider.set("secret:shared", "synthetic-refreshed-value")
+    operations.run(registry, a, "prepare")
+    assert "synthetic-refreshed-value" in (Path(a["path"]) / ".env").read_text()
+    assert (Path(b["path"]) / ".env").read_text() == snapshot
+    assert (repo / ".env").read_text() == "source handwritten settings"
+
+
+def test_prepare_failure_and_export_protection_keep_same_taskenv(
+    registry: Registry, repo: Path
+) -> None:
+    (repo / CONFIG).write_text(
+        'schema_version=1\n[taskenv]\nenv_file=".env"\n'
+        "[commands.prepare]\nargv="
+        + json.dumps([sys.executable, "-c", "raise SystemExit(9)"])
+        + "\n"
+    )
+    task = register(registry, repo)
+    for _ in range(2):
+        failed = operations.run(registry, task, "prepare")
+        assert failed["state"] == "failed" and "handoff" not in failed
+    assert len(registry.all("taskenv")) == 1
+    assert registry.all("taskenv")[0]["id"] == task["id"]
+    (repo / ".env").write_text("handwritten")
+    with pytest.raises(ManagementError) as rejected:
+        operations.run(registry, task, "prepare")
+    assert rejected.value.code == "unmanaged_env"
+    assert (repo / ".env").read_text() == "handwritten"
+    assert len(registry.all("operation")) == 2
+
+
+@pytest.mark.parametrize("output", ["", ".", "../outside", "/absolute", ".git/config", 3])
+def test_project_env_delivery_requires_relative_regular_file(repo: Path, output: object) -> None:
+    (repo / CONFIG).write_text("schema_version=1\n[taskenv]\nenv_file=" + json.dumps(output))
+    with pytest.raises(ManagementError) as rejected:
+        load(repo / CONFIG)
+    assert rejected.value.code == "invalid_config"
+
+
 def test_foreground_results_failure_and_shared_secret(registry: Registry, repo: Path) -> None:
     recipe(repo)
     main = register(registry, repo)
@@ -159,3 +275,21 @@ def test_malformed_result_and_escaped_secret_redaction(registry: Registry, repo:
     task = register(registry, repo)
     observed = operations.run(registry, task, "prepare")
     assert observed["exit_code"] == 0 and observed["state"] == "unknown"
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "fifo"])
+def test_result_collection_rejects_worker_replaced_files(tmp_path: Path, kind: str) -> None:
+    import os
+
+    central = tmp_path / "central.json"
+    central.write_text('{"urls":["https://private.invalid/"]}')
+    result = tmp_path / "result.json"
+    if kind == "symlink":
+        result.symlink_to(central)
+    elif kind == "hardlink":
+        os.link(central, result)
+    else:
+        os.mkfifo(result)
+    with pytest.raises(ManagementError) as rejected:
+        operations.result_data(result, [])
+    assert rejected.value.code == "invalid_result"

@@ -228,6 +228,8 @@ Lodex 將解析後的設定直接傳給命令與服務；設定檔由專案自�
 [整合更新規則](docs/management.md#updating-integrations)。
 受限 worker 可透過[服務委派](docs/service-delegation.md)控制指定 taskenv 的具名服務，
 無須取得管理資料庫的存取權。
+使用 dotenv 的 project 可設定一次 `[taskenv] env_file = ".env"`，之後 `prepare`
+會先安全輸出該 taskenv 的設定，再執行專案準備命令。
 
 ### 對話歷史
 
@@ -282,6 +284,13 @@ Lodex 的 CLI、Console、歷史工具與其他 skills 都能獨立於 Herdr 使
 Codex 的建議設定名稱為 `lodex-manager`、`lodex-worker`；它們是設定 profile，
 不是 Lodex 子命令或服務。由你先以總管設定啟動 agent，再由總管依 skill 啟動 worker。
 安裝 skill 不會替 agent 安裝設定或重新啟動。
+
+工作流支援 Herdr TUI 與 herdr-core；Herdr App 顯示的是同一套 core terminals。
+A 保留協調對話，B／C 完成一輪後仍可繼續互動，你也能直接在 B／C 追加工作再回到 A。
+B／C 自行控制各自獲授權的服務，由一般 controller 程式處理授權與中央記錄。
+`worktree worker-config` 依成功的 prepare／grant 產生任務專屬 Codex 權限與路由草稿，
+不修改全域設定；launcher 防止同一 taskenv 同時啟動第二個 writer。
+替換 grant 時需停止舊程序、以新設定續接；限權收尾使用 `cleanup --worker-policy PATH`。
 
 角色設定、選用的總管快捷鍵，以及派工、驗證到收尾，見
 [Herdr 完整指南（英文）](docs/herdr.md)。也請保留 Herdr 自己的 skill，以取得目前 CLI 與互動式操作方式。

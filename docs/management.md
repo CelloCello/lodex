@@ -163,6 +163,7 @@ names, without a `secret:` prefix, and need no project, worktree or `--target`.
 | `worktree attach PROJECT PATH [--config PATH]` | No | Register an existing worktree belonging to the project's local repository, including its main worktree. |
 | `worktree list` | No | List registered environments and their current inspection state. |
 | `worktree inspect` | Yes | Inspect configuration, worktree identity and known resource records, even when the worktree is missing. |
+| `worktree worker-config --prepare-operation ID --profile NAME --uv-cache PATH [--delegation ID] [--allow-host HOST] [--deny-socket PATH] [--deny-path PATH] [--trust-checkout]` | Yes | Draft protected per-launch Codex settings for a successful prepare; no agent launch or global profile installation. Checkout trust is explicit and invocation-only. |
 | `context` | Yes | Resolve and inspect an environment whose worktree is still present and matches its saved identity. |
 | `worktree remove [--yes] [--force]` | Yes | Preview deletion of an owned worktree; `--yes` executes, `--force` overrides Git protection. Retain the branch and taskenv record. |
 | `worktree forget [--yes]` | Yes | Preview or execute deregistration only; do not stop services or delete worktree files. |
@@ -171,9 +172,9 @@ names, without a `secret:` prefix, and need no project, worktree or `--target`.
 
 | Command | Target | Purpose |
 | --- | --- | --- |
-| `prepare [--config PATH]` | Yes | Supply missing configuration if needed and run `commands.prepare` in the foreground. |
+| `prepare [--config PATH]` | Yes | Supply missing configuration, export the declared `taskenv.env_file`, then run `commands.prepare`; successful results include a handoff snapshot. |
 | `run NAME` | Yes | Execute the repository-defined `commands.NAME.argv` in the foreground and record its outcome. |
-| `cleanup` | Yes | Run `commands.cleanup`; resource cleanup depends on the repository's recipe. |
+| `cleanup [--worker-policy PATH]` | Yes | Run `commands.cleanup` in caller permissions, or use a protected task-bound policy for restricted execution and management-side result collection. |
 | `service start NAME` | Yes | Start a configured process and check its configured readiness condition. |
 | `service stop NAME` | Yes | Stop a managed service using its saved process identity. |
 | `service list` | Yes | List saved service records and refresh their state. |
@@ -300,6 +301,33 @@ Dotenv export writes a 0600 file with quoted values. It refuses Git-tracked file
 unignored secret output and handwritten/modified existing files. A generated file
 can be refreshed only while its content matches Lodex's saved digest. No Git ignore
 changes are implicit. An existing source `.env` is never copied.
+
+To deliver a dotenv file each time an environment is prepared, declare it once:
+
+```toml
+[taskenv]
+env_file = ".env"
+```
+
+`prepare` validates the command and inputs, then exports this file **before**
+executing the recipe, so preparation may load it. Its parent directory must
+already exist; the normal export checks still reject tracked, unignored secret,
+handwritten or modified outputs. A failure preserves the taskenv for inspection;
+retry with the same ID after fixing it. Preparation can have repository-defined
+side effects and is not guaranteed to execute only once. Without `env_file`,
+no file is exported automatically; the recipe may produce its own application
+settings. This optional field requires a Lodex version supporting it.
+
+A successful prepare result contains `handoff`: the taskenv ID/path, project,
+creation base commit (null for older/attached worktrees), checkout commit at
+preparation, configuration and delivered-file paths, configured service names,
+secret references and prepare operation ID. It contains no resolved settings or
+secret values. It is a snapshot, not a permanent readiness flag or authorization:
+the coordinating skill adds the task, actual runtime identity, selected agent
+settings and service grant before dispatch. Failed runs have no handoff. Creating
+a worktree alone still does not prepare or launch anything. A new `prepare` or
+explicit `env export` refreshes a managed file; existing files and running services
+do not update when a shared secret changes.
 
 Application configuration files are optional; their loading and synchronization
 are project-defined. Lodex passes resolved `[env]`/`[secrets]` inputs to processes;

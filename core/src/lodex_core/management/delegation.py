@@ -20,7 +20,7 @@ from typing import Any
 from lodex_core.management import services, worktrees
 from lodex_core.management.common import ManagementError, now, private_dir, write_private
 from lodex_core.management.environment import inputs
-from lodex_core.management.project_config import CONFIG, load
+from lodex_core.management.project_config import CONFIG, digest, load
 from lodex_core.management.store import Registry
 
 ENVIRONMENT = "LODEX_SERVICE_DELEGATION"
@@ -133,6 +133,7 @@ class Controller:
                         "taskenv": self.task["id"],
                         "active": True,
                         "services": self.names,
+                        "configuration_digest": digest(self.config),
                         "socket": str(endpoint),
                         "runtime_root": str(root),
                         "created_at": now(),

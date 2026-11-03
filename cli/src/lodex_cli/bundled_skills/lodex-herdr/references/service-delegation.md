@@ -15,12 +15,16 @@ initial result supplies an ID, credential path, Unix socket and runtime root;
 do not print or forward the token itself. The grant captures the recipe/secret
 references; changed recipes require a new grant, application-code edits do not.
 
-Review a worker launch configuration that provides the credential path through
+Use `worktree worker-config` and the [Codex reference](codex.md) to draft a
+task-specific policy after successful prepare. Review a worker launch configuration that provides the credential path through
 `LODEX_SERVICE_DELEGATION`, permits writes only to its checkout and grant runtime,
 and permits the grant socket and its own service sockets. Protect central state
 and other credentials/runtime paths from reads and writes. A broad Lodex-root or
 localhost grant is not an equivalent boundary. Present concrete paths and obtain
 confirmation before applying permissions. Check inherited tools/cache grants too.
+Reuse existing approval for the same rule contract and generated task paths;
+changes to roots, hosts, tools or service scope need review. No global profile
+installation is performed by policy drafting.
 
 With those permissions validated, workers use ordinary `lodex service`
 start/stop/list/inspect/logs against their assigned taskenv.
@@ -48,3 +52,7 @@ inspect can collect it. Worker-written terminal states cannot authorize replacem
 Pending ACKs retain independent launch results across restarts and remain visible
 in service warnings. The manager can run `service retry-acks NAME --target ID --json`
 without stopping the replacement service; workers report these pending items.
+
+For the exact stop-old-worker/new-policy/native-resume sequence and restricted
+cleanup before revoke, follow [lifecycle](lifecycle.md). A controller outlives A's
+reasoning turn but does not need to live forever when only the checkout is kept.

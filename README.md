@@ -243,6 +243,8 @@ dotenv; `env show` does not read application files. See the
 [integration update rules](docs/management.md#updating-integrations) for details.
 For restricted workers, [delegate named services](docs/service-delegation.md)
 in one taskenv without granting management DB access.
+Projects using dotenv can declare `[taskenv] env_file = ".env"` once; `prepare`
+then safely exports that taskenv's current inputs before running its recipe.
 
 ### Session history
 
@@ -294,7 +296,10 @@ For work involving multiple coding agents, you can combine Lodex with Herdr.
 A manager agent can prepare a separate task checkout for each worker, delegate
 work and collect results. Lodex manages the checkouts and services; Herdr provides
 the panes and agent processes. The `lodex-herdr` skill guides the manager through
-this workflow, connecting environment preparation with worker launches and follow-up.
+this workflow, connecting environment preparation with persistent B/C launches and follow-up.
+Use Herdr TUI or herdr-core; the Herdr App presents core terminals. The user can
+work directly in B/C and return to A. Workers independently manage their own
+delegated services, while the controller authorizes/records without running repo code.
 Lodex's CLI, Console, history tools and other skills work independently of Herdr.
 
 Keep the manager in the source repo and give each worker its own task checkout.
@@ -302,6 +307,10 @@ For Codex, the suggested config names are `lodex-manager` and `lodex-worker`;
 these are config profiles, not Lodex commands or services. You start the manager
 with its profile; the manager then follows the skill to launch workers with theirs.
 Installing a skill does not configure or restart an agent.
+`worktree worker-config` drafts task-specific Codex permissions and routing from a
+successful prepare/grant without changing global settings. The launcher guards
+against a second writer; grant replacement requires stopped-worker resume with
+new settings. Restricted teardown uses `cleanup --worker-policy PATH`.
 
 Follow the [Herdr guide](docs/herdr.md) for role setup, an optional
 manager shortcut, dispatch, verification and cleanup. Keep Herdr's own skill

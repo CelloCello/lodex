@@ -117,6 +117,26 @@ If a controller was killed without cleanup, revoke its saved ID before creating
 a replacement. Inspect interrupted/unknown launches before retrying. Do not
 delete runtime files while their services may still be running.
 
+For persistent interactive workers, grant replacement also changes the paths that
+the agent's sandbox must allow. Stop/confirm the affected worker, render a new
+`worktree worker-config` using the new grant, then resume the same native session
+and taskenv with those settings. Existing services retain their original pinned
+handles until stopped; they are not relocated into the new runtime. A changed
+credential does not update an already-running agent's permissions. Keep the peer
+taskenv untouched. See [session lifecycle](../cli/src/lodex_cli/bundled_skills/lodex-herdr/references/lifecycle.md).
+
+Repo cleanup is outside the service grant. Run it under taskenv permissions,
+including after agent exit via `lodex cleanup --target ID --worker-policy PATH`.
+The manager records results while a restricted runner executes the recipe; plain
+`cleanup` still uses caller permissions. The restricted path checks project secret
+references against the prepared handoff before resolving them; changed secret
+scope requires review and preparation of a new policy. Project variables and
+secrets enter the sandboxed command through its private input pipe; the outer
+launcher uses trusted management inputs so loader variables cannot run repo code
+before sandboxing. Cleanup failure does not authorize an administrative retry,
+revoke or environment removal. Complete project cleanup,
+service stop and terminal recording/ACK before explicitly ending the controller.
+
 ## Verification
 
 The unit/CLI suites use disposable taskenvs to test scope enforcement, malformed
