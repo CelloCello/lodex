@@ -1,5 +1,6 @@
 # Template: inspect inherited settings/tools via references/codex.md first.
-# Launch with -C set to exactly one Lodex checkout and no extra writable roots.
+# Baseline only. For delegation, draft per-task rules with worktree worker-config;
+# use its launcher_argv inside the selected runtime. No extra writable roots.
 approval_policy = "never"
 default_permissions = "lodex-worker"
 
@@ -15,6 +16,8 @@ enabled = false
 
 # Deliberately no Lodex state grant, Herdr socket grant, or Git write override.
 # Omitting grants here does not revoke inherited grants; review them explicitly.
+# The generated launch policy uses its own permission profile, denies central/peer
+# data and limits temp; this standalone baseline does not establish those claims.
 # Add explicit per-server/per-plugin disables after inspecting local config.
 # Example for an existing MCP server named computer-use:
 # [mcp_servers.computer-use]

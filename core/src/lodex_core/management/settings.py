@@ -46,45 +46,52 @@ def export(
 ) -> dict[str, Any]:
     with registry.lock(task["id"]):
         registry.reload_task(task)
-        root = require_present(task)
-        path = root / relative
-        if Path(relative).is_absolute() or ".." in Path(relative).parts or path.is_symlink():
-            raise ManagementError(
-                "invalid_output", "Output must be a regular file inside the worktree"
-            )
-        if not path.parent.is_dir() or root not in path.resolve().parents:
-            raise ManagementError("invalid_output", "Output parent must exist inside the worktree")
         _config, values, known = inputs(registry, task, provider)
-        if git(root, "ls-files", "--", relative):
-            raise ManagementError(
-                "tracked_env", "Refusing to write configuration to a Git-tracked file"
-            )
-        if known:
-            try:
-                git(root, "check-ignore", "--", relative)
-            except ManagementError as exc:
-                raise ManagementError(
-                    "unignored_secret_file",
-                    "Add output to repo ignore rules before exporting secrets",
-                ) from exc
-        exports = task.setdefault("exports", {})
-        if path.exists():
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            if exports.get(relative) != digest:
-                raise ManagementError(
-                    "unmanaged_env", "Output is handwritten or modified; choose another path"
-                )
-        content = "".join(
-            f"{key}={json.dumps(value, ensure_ascii=False)}\n"
-            for key, value in sorted(values.items())
+        return export_resolved(registry, task, relative, values, known)
+
+
+def export_resolved(
+    registry: Registry,
+    task: dict[str, Any],
+    relative: str,
+    values: dict[str, str],
+    known: list[str],
+) -> dict[str, Any]:
+    """Export one already resolved snapshot; caller must hold the task lock."""
+    root = require_present(task)
+    path = root / relative
+    if Path(relative).is_absolute() or ".." in Path(relative).parts or path.is_symlink():
+        raise ManagementError("invalid_output", "Output must be a regular file inside the worktree")
+    if not path.parent.is_dir() or root not in path.resolve().parents:
+        raise ManagementError("invalid_output", "Output parent must exist inside the worktree")
+    if git(root, "ls-files", "--", relative):
+        raise ManagementError(
+            "tracked_env", "Refusing to write configuration to a Git-tracked file"
         )
-        fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".lodex-env-")
+    if known:
         try:
-            with os.fdopen(fd, "w") as stream:
-                stream.write(content)
-            os.replace(temporary, path)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
-        exports[relative] = hashlib.sha256(content.encode()).hexdigest()
-        registry.put("taskenv", task)
-        return {"path": str(path), "mode": "0600", "keys": sorted(values)}
+            git(root, "check-ignore", "--", relative)
+        except ManagementError as exc:
+            raise ManagementError(
+                "unignored_secret_file", "Add output to repo ignore rules before exporting secrets"
+            ) from exc
+    exports = task.setdefault("exports", {})
+    if path.exists():
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if exports.get(relative) != digest:
+            raise ManagementError(
+                "unmanaged_env", "Output is handwritten or modified; choose another path"
+            )
+    content = "".join(
+        f"{key}={json.dumps(value, ensure_ascii=False)}\n" for key, value in sorted(values.items())
+    )
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".lodex-env-")
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(content)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    exports[relative] = hashlib.sha256(content.encode()).hexdigest()
+    registry.put("taskenv", task)
+    return {"path": str(path), "mode": "0600", "keys": sorted(values)}

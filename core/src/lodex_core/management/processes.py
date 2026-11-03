@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 STOP_GRACE_SECONDS = 3
+_PROC_PGRP_ONLY = 2  # macOS sys/proc_info.h
 
 
 class _DarwinSiginfo(c.Structure):
@@ -27,6 +28,11 @@ class _DarwinSiginfo(c.Structure):
 
 
 _native_waitid = None
+_native_listpids = None
+if sys.platform == "darwin":
+    _native_listpids = c.CDLL("/usr/lib/libproc.dylib", use_errno=True).proc_listpids
+    _native_listpids.argtypes = [c.c_uint32, c.c_uint32, c.c_void_p, c.c_int]
+    _native_listpids.restype = c.c_int
 if sys.platform == "darwin" and not hasattr(os, "waitid"):
     _native_waitid = c.CDLL(None, use_errno=True).waitid
     _native_waitid.argtypes = [c.c_uint, c.c_uint, c.POINTER(_DarwinSiginfo), c.c_int]
@@ -63,6 +69,18 @@ def signal_group(child: subprocess.Popen[bytes], signum: int) -> None:
         # with different credentials is a real failure, not a successful stop.
         if sys.platform != "darwin":
             raise
+        # Seatbelt may also prohibit running ps. Accept only positive proof that
+        # this group contains exactly our unreaped, exited child. Two slots make
+        # larger/truncated groups fail closed; no unrelated PIDs are inspected.
+        group_pids = (c.c_int * 2)()
+        if (
+            _native_listpids is not None
+            and exited_without_reaping(child.pid)
+            and _native_listpids(_PROC_PGRP_ONLY, child.pid, group_pids, c.sizeof(group_pids))
+            == c.sizeof(c.c_int)
+            and group_pids[0] == child.pid
+        ):
+            return
         members = subprocess.run(
             ["/bin/ps", "-g", str(child.pid), "-o", "stat="],
             capture_output=True,

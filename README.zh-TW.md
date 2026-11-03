@@ -22,7 +22,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-20332f?style=flat-square" alt="授權：Apache 2.0" /></a>
-  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.3.0-20332f?style=flat-square" alt="版本 0.3.0" /></a>
+  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.4.0-20332f?style=flat-square" alt="版本 0.4.0" /></a>
   <a href="#安裝"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11 以上" /></a>
   <a href="docs/history.md#connect-codex-through-mcp"><img src="https://img.shields.io/badge/MCP-read--only_history-626b68?style=flat-square" alt="MCP：唯讀歷史查詢" /></a>
 </p>
@@ -81,7 +81,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --find-links dist dist/lodex-0.3.0-py3-none-any.whl
+uv tool install --find-links dist dist/lodex-0.4.0-py3-none-any.whl
 lodex --version
 lodex --help
 ```
@@ -93,7 +93,7 @@ lodex --help
 安裝後即可在任意目錄啟動：
 
 ```bash
-uv tool install --force --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
+uv tool install --force --find-links dist 'dist/lodex-0.4.0-py3-none-any.whl[console]'
 lodex console --port 8765
 ```
 
@@ -226,6 +226,10 @@ Lodex 將解析後的設定直接傳給命令與服務；設定檔由專案自�
 `env export` 可將這些輸入匯出為 dotenv；`env show` 不會讀取應用程式設定檔。
 詳細契約見[服務設定](docs/management.md#commands-and-services)與
 [整合更新規則](docs/management.md#updating-integrations)。
+受限 worker 可透過[服務委派](docs/service-delegation.md)控制指定 taskenv 的具名服務，
+無須取得管理資料庫的存取權。
+使用 dotenv 的 project 可設定一次 `[taskenv] env_file = ".env"`，之後 `prepare`
+會先安全輸出該 taskenv 的設定，再執行專案準備命令。
 
 ### 對話歷史
 
@@ -281,6 +285,13 @@ Codex 的建議設定名稱為 `lodex-manager`、`lodex-worker`；它們是設�
 不是 Lodex 子命令或服務。由你先以總管設定啟動 agent，再由總管依 skill 啟動 worker。
 安裝 skill 不會替 agent 安裝設定或重新啟動。
 
+工作流支援 Herdr TUI 與 herdr-core；Herdr App 顯示的是同一套 core terminals。
+A 保留協調對話，B／C 完成一輪後仍可繼續互動，你也能直接在 B／C 追加工作再回到 A。
+B／C 自行控制各自獲授權的服務，由一般 controller 程式處理授權與中央記錄。
+`worktree worker-config` 依成功的 prepare／grant 產生任務專屬 Codex 權限與路由草稿，
+不修改全域設定；launcher 防止同一 taskenv 同時啟動第二個 writer。
+替換 grant 時需停止舊程序、以新設定續接；限權收尾使用 `cleanup --worker-policy PATH`。
+
 角色設定、選用的總管快捷鍵，以及派工、驗證到收尾，見
 [Herdr 完整指南（英文）](docs/herdr.md)。也請保留 Herdr 自己的 skill，以取得目前 CLI 與互動式操作方式。
 給 agent 的詳細指引與權限範本，則見內建的
@@ -324,7 +335,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --force --reinstall --find-links dist dist/lodex-0.3.0-py3-none-any.whl
+uv tool install --force --reinstall --find-links dist dist/lodex-0.4.0-py3-none-any.whl
 lodex skill install lodex-history --dry-run
 lodex skill install lodex-history
 ```
@@ -332,7 +343,7 @@ lodex skill install lodex-history
 若已安裝 Console，請將上面的 `uv tool install` 命令替換為：
 
 ```bash
-uv tool install --force --reinstall --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
+uv tool install --force --reinstall --find-links dist 'dist/lodex-0.4.0-py3-none-any.whl[console]'
 ```
 
 已安裝的 Console 會提供 Server wheel 內附的前端資源。

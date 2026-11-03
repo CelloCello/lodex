@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import signal
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -36,6 +37,7 @@ secret_app = management_group("Manage central secret values by stored name.")
 
 @contextmanager
 def registry(*, read_only: bool = False) -> Generator[Registry, None, None]:
+    require_registry_access()
     store = Registry(read_only=read_only)
     try:
         yield store
@@ -44,9 +46,15 @@ def registry(*, read_only: bool = False) -> Generator[Registry, None, None]:
 
 
 def no_registry() -> bool:
+    require_registry_access()
     return not (
         Path(os.environ.get("LODEX_HOME", "~/.lodex")).expanduser() / "management.db"
     ).exists()
+
+
+def require_registry_access() -> None:
+    if os.environ.get("LODEX_SERVICE_DELEGATION"):
+        raise ManagementError("delegation_scope", "Delegation is limited to service operations")
 
 
 def resolve(store: Registry, target: str | None) -> dict[str, Any]:
@@ -137,6 +145,48 @@ def worktree_attach(
         return management_result(ctx, worktrees.attach(store, project, path, config), as_json)
 
 
+@worktree_app.command("worker-config")
+def worker_config(
+    ctx: typer.Context,
+    prepare_operation: Annotated[str, typer.Option(help="Successful prepare operation ID.")],
+    profile: Annotated[str, typer.Option(help="Reviewed Codex config profile name.")],
+    uv_cache: Annotated[Path, typer.Option(help="Observed absolute shared uv cache path.")],
+    target: Target = None,
+    delegation: Annotated[str | None, typer.Option(help="Active service delegation ID.")] = None,
+    allow_host: Annotated[
+        list[str] | None, typer.Option(help="Required application host; repeat.")
+    ] = None,
+    deny_socket: Annotated[
+        list[Path] | None, typer.Option(help="Herdr/other control socket; repeat.")
+    ] = None,
+    deny_path: Annotated[
+        list[Path] | None, typer.Option(help="Additional private path to deny; repeat.")
+    ] = None,
+    trust_checkout: Annotated[
+        bool, typer.Option(help="Trust this reviewed checkout for this invocation only.")
+    ] = False,
+    as_json: Json = False,
+) -> int:
+    """Draft per-launch Codex settings; does not install settings or start an agent."""
+    from lodex_cli import worker_policy
+
+    with registry() as store:
+        task = resolve(store, target)
+        result = worker_policy.render(
+            store,
+            task,
+            prepare_operation=prepare_operation,
+            profile=profile,
+            cache=uv_cache,
+            delegation=delegation,
+            hosts=allow_host,
+            control_sockets=deny_socket,
+            denied_paths=deny_path,
+            trust_checkout=trust_checkout,
+        )
+        return management_result(ctx, result, as_json)
+
+
 @worktree_app.command("list")
 def worktree_list(ctx: typer.Context, as_json: Json = False) -> int:
     """List registered environments and their inspection state."""
@@ -206,9 +256,50 @@ def run(ctx: typer.Context, name: str, target: Target = None, as_json: Json = Fa
     return run_operation(ctx, name, target, None, as_json)
 
 
-def cleanup(ctx: typer.Context, target: Target = None, as_json: Json = False) -> int:
-    """Run the repository's cleanup command."""
-    return run_operation(ctx, "cleanup", target, None, as_json)
+def cleanup(
+    ctx: typer.Context,
+    target: Target = None,
+    worker_policy: Annotated[
+        Path | None, typer.Option(help="Protected worker policy for restricted cleanup.")
+    ] = None,
+    as_json: Json = False,
+) -> int:
+    """Run cleanup in caller permissions, or in the selected worker's sandbox."""
+    if worker_policy is None:
+        return run_operation(ctx, "cleanup", target, None, as_json)
+    from lodex_cli import worker_policy as policies
+    from lodex_core.management import operations
+
+    with registry() as store:
+        task = resolve(store, target)
+        policy = policies.read(store, task, worker_policy)
+
+        def execute(result: Path) -> list[str]:
+            # Only this operation's result file is opened beneath central state.
+            # Its parent, records and logs remain inaccessible to checkout code.
+            rule = f"permissions.{policy['permission_profile']}.filesystem=" + policies.toml_value(
+                {**policy["filesystem"], str(result): "write"}
+            )
+            return [
+                *policy["sandbox_argv"],
+                "-c",
+                rule,
+                "--",
+                sys.executable,
+                "-I",
+                "-m",
+                "lodex_cli.cleanup_worker",
+            ]
+
+        result = operations.run(
+            store,
+            task,
+            "cleanup",
+            execution=execute,
+            execution_env={**policy["routes"], **policy["launch_env"]},
+            approved_secret_refs=policy["handoff"]["secret_refs"],
+        )
+        return management_result(ctx, result, as_json, ok=result["state"] == "succeeded")
 
 
 @service_app.command("start")
@@ -218,6 +309,9 @@ def service_start(
     """Start a configured service and check readiness."""
     from lodex_core.management import services
 
+    delegated = worker_service(ctx, "start", name, target, as_json)
+    if delegated is not None:
+        return delegated
     with registry() as store:
         return management_result(ctx, services.start(store, resolve(store, target), name), as_json)
 
@@ -229,6 +323,9 @@ def service_stop(
     """Stop a managed service using its saved identity."""
     from lodex_core.management import services
 
+    delegated = worker_service(ctx, "stop", name, target, as_json)
+    if delegated is not None:
+        return delegated
     with registry() as store:
         task = resolve(store, target)
         return management_result(ctx, services.stop(store, task["id"], name), as_json)
@@ -239,6 +336,9 @@ def service_list(ctx: typer.Context, target: Target = None, as_json: Json = Fals
     """List saved service records and refresh their state."""
     from lodex_core.management import services
 
+    delegated = worker_service(ctx, "list", None, target, as_json)
+    if delegated is not None:
+        return delegated
     with registry(read_only=True) as store:
         return management_result(
             ctx, services.list_services(store, resolve(store, target)["id"]), as_json
@@ -252,10 +352,25 @@ def service_inspect(
     """Inspect and refresh a saved service record."""
     from lodex_core.management import services
 
+    delegated = worker_service(ctx, "inspect", name, target, as_json)
+    if delegated is not None:
+        return delegated
     with registry(read_only=True) as store:
         task = resolve(store, target)
         result = services.refresh(store.get("service", f"{task['id']}-{name}"))
-        return management_result(ctx, result, as_json)
+        return management_result(ctx, services.with_pending_acks(store, result), as_json)
+
+
+@service_app.command("retry-acks")
+def service_retry_acks(
+    ctx: typer.Context, name: str, target: Target = None, as_json: Json = False
+) -> int:
+    """Retry saved terminal acknowledgements without stopping the current service (manager)."""
+    from lodex_core.management import services
+
+    with registry() as store:
+        task = resolve(store, target)
+        return management_result(ctx, services.retry_acks(store, task["id"], name), as_json)
 
 
 @service_app.command("logs")
@@ -265,9 +380,66 @@ def service_logs(
     """Read a service's recent log tail."""
     from lodex_core.management import services
 
+    delegated = worker_service(ctx, "logs", name, target, as_json)
+    if delegated is not None:
+        return delegated
     with registry(read_only=True) as store:
         task = resolve(store, target)
         return management_result(ctx, services.logs(store, task["id"], name), as_json)
+
+
+def worker_service(
+    ctx: typer.Context, action: str, name: str | None, target: str | None, as_json: bool
+) -> int | None:
+    credential = os.environ.get("LODEX_SERVICE_DELEGATION")
+    if not credential:
+        return None
+    from lodex_core.management.delegation import Client
+
+    return management_result(ctx, Client(Path(credential)).perform(action, name, target), as_json)
+
+
+@service_app.command("delegate")
+def service_delegate(
+    ctx: typer.Context,
+    service: Annotated[
+        list[str], typer.Option("--service", help="Allow this service; repeat explicitly.")
+    ],
+    target: Target = None,
+    as_json: Json = False,
+) -> int:
+    """Serve one taskenv's service delegation in the foreground until revoked or stopped."""
+    from lodex_core.management.delegation import Controller
+
+    with registry() as store:
+        controller = Controller(store, resolve(store, target), service)
+
+        def interrupted(signum: int, frame: object) -> None:
+            raise KeyboardInterrupt
+
+        previous = signal.signal(signal.SIGTERM, interrupted)
+
+        def ready(info: dict[str, Any]) -> None:
+            management_result(ctx, info, as_json)
+            sys.stdout.flush()
+
+        try:
+            controller.serve(ready)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            controller.close()
+            signal.signal(signal.SIGTERM, previous)
+    return 0
+
+
+@service_app.command("revoke")
+def service_revoke(ctx: typer.Context, identity: str, as_json: Json = False) -> int:
+    """Revoke a service delegation; leave its services available for manager takeover."""
+    from lodex_core.management.delegation import revoke
+
+    with registry() as store:
+        return management_result(ctx, revoke(store, identity), as_json)
 
 
 @operation_app.command("list")

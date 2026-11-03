@@ -1,4 +1,4 @@
-"""Per-service supervisor. Owns its child and authenticated loopback control socket.
+"""Per-service supervisor. Owns its child and authenticated local control socket.
 
 Started only for an explicitly requested service; no global daemon or restart policy.
 Input (including secrets) arrives over an anonymous pipe and is never persisted.
@@ -25,6 +25,7 @@ from lodex_core.management.processes import (
     exited_without_reaping,
     signal_group,
 )
+from lodex_core.management.service_runtime import TERMINAL_STATES
 
 
 def supervise(payload: dict[str, Any]) -> None:
@@ -66,20 +67,49 @@ def supervise(payload: dict[str, Any]) -> None:
 
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
-    with socket.socket() as server, selectors.DefaultSelector() as selector:
-        server.bind(("127.0.0.1", 0))
+    control_socket = payload.get("control_socket")
+    with (
+        socket.socket(socket.AF_UNIX if control_socket else socket.AF_INET) as server,
+        selectors.DefaultSelector() as selector,
+    ):
+        server.bind(control_socket if control_socket else ("127.0.0.1", 0))
         server.listen(4)
         server.setblocking(False)
         write_private(
             directory / "control.json",
             json.dumps(
                 {
-                    "port": server.getsockname()[1],
+                    **(
+                        {"socket": control_socket}
+                        if control_socket
+                        else {"port": server.getsockname()[1]}
+                    ),
                     "token": token,
                 }
             ),
         )
         selector.register(server, selectors.EVENT_READ, "control")
+
+        def respond() -> bool:
+            nonlocal requested_stop
+            connection, _ = server.accept()
+            with connection:
+                connection.settimeout(0.25)
+                try:
+                    request = json.loads(connection.recv(4096))
+                    if not isinstance(request, dict) or not hmac.compare_digest(
+                        str(request.get("token", "")).encode(), token.encode()
+                    ):
+                        return False
+                    action = request.get("action")
+                    acknowledged = action == "ack_terminal" and status["state"] in TERMINAL_STATES
+                    if action == "stop":
+                        requested_stop = True
+                    connection.sendall(json.dumps(status).encode())
+                    return acknowledged
+                except (OSError, ValueError, RecursionError):
+                    return False
+
         fd = os.open(directory / "output.log", os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
         with os.fdopen(fd, "wb", buffering=0) as log:
             try:
@@ -111,20 +141,7 @@ def supervise(payload: dict[str, Any]) -> None:
                             else:
                                 selector.unregister(child.stdout)
                         else:
-                            connection, _ = server.accept()
-                            with connection:
-                                connection.settimeout(0.25)
-                                try:
-                                    request = json.loads(connection.recv(4096))
-                                    if not hmac.compare_digest(
-                                        str(request.get("token", "")), token
-                                    ):
-                                        continue
-                                    if request.get("action") == "stop":
-                                        requested_stop = True
-                                    connection.sendall(json.dumps(status).encode())
-                                except (OSError, ValueError):
-                                    pass
+                            respond()
                     if requested_stop:
                         begin_stop("stopped")
                     elif stop_deadline is None and exited_without_reaping(child.pid):
@@ -204,9 +221,19 @@ def supervise(payload: dict[str, Any]) -> None:
                     signal_group(probe, signal.SIGKILL)
                     probe.wait()
                 if child is not None and child.stdout is not None:
+                    try:
+                        selector.unregister(child.stdout)
+                    except KeyError:
+                        pass
                     child.stdout.close()
                 log.write(redactor.feed(b"", final=True))
                 save()
+        if control_socket and status["state"] in TERMINAL_STATES:
+            # Keep terminal evidence available until the manager durably records
+            # it. Neither a local status file nor a disconnected client is an ACK.
+            while True:
+                if selector.select(timeout=0.2) and respond():
+                    break
 
 
 def main() -> None:

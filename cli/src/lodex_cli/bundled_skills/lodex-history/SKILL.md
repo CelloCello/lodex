@@ -7,6 +7,16 @@ description: Search locally indexed Codex session history for past discussions, 
 
 Use Lodex to recover concise, inspectable evidence from prior Codex sessions.
 
+## Restricted worker scope
+
+In a bounded B/C session without approved history access, use the handed-off
+context or request relevant excerpts from coordinating session A. Read-only
+history still needs its declared data/tool permissions. The ordinary query and
+approval-retry workflow below does not authorize crossing a worker boundary:
+do not enable MCP tools, unset delegation, switch profiles or retry outside the
+sandbox to obtain denied history. Sessions with approved history access retain
+the scoped workflow below.
+
 ## Choose the query interface
 
 Prefer the configured `lodex` MCP server's `status`, `search`, and `show` tools in both

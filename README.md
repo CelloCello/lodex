@@ -22,7 +22,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-20332f?style=flat-square" alt="License: Apache 2.0" /></a>
-  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.3.0-20332f?style=flat-square" alt="Version 0.3.0" /></a>
+  <a href="cli/pyproject.toml"><img src="https://img.shields.io/badge/version-0.4.0-20332f?style=flat-square" alt="Version 0.4.0" /></a>
   <a href="#installation"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11 or newer" /></a>
   <a href="docs/history.md#connect-codex-through-mcp"><img src="https://img.shields.io/badge/MCP-read--only_history-626b68?style=flat-square" alt="MCP: read-only history retrieval" /></a>
 </p>
@@ -88,7 +88,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --find-links dist dist/lodex-0.3.0-py3-none-any.whl
+uv tool install --find-links dist dist/lodex-0.4.0-py3-none-any.whl
 lodex --version
 lodex --help
 ```
@@ -101,7 +101,7 @@ For the optional browser console, install the extra from the release set built
 above. You can then start the installed console from any directory:
 
 ```bash
-uv tool install --force --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
+uv tool install --force --find-links dist 'dist/lodex-0.4.0-py3-none-any.whl[console]'
 lodex console --port 8765
 ```
 
@@ -241,6 +241,10 @@ files are optional and project-managed. `env export` can write these inputs as
 dotenv; `env show` does not read application files. See the
 [service settings](docs/management.md#commands-and-services) and
 [integration update rules](docs/management.md#updating-integrations) for details.
+For restricted workers, [delegate named services](docs/service-delegation.md)
+in one taskenv without granting management DB access.
+Projects using dotenv can declare `[taskenv] env_file = ".env"` once; `prepare`
+then safely exports that taskenv's current inputs before running its recipe.
 
 ### Session history
 
@@ -292,7 +296,10 @@ For work involving multiple coding agents, you can combine Lodex with Herdr.
 A manager agent can prepare a separate task checkout for each worker, delegate
 work and collect results. Lodex manages the checkouts and services; Herdr provides
 the panes and agent processes. The `lodex-herdr` skill guides the manager through
-this workflow, connecting environment preparation with worker launches and follow-up.
+this workflow, connecting environment preparation with persistent B/C launches and follow-up.
+Use Herdr TUI or herdr-core; the Herdr App presents core terminals. The user can
+work directly in B/C and return to A. Workers independently manage their own
+delegated services, while the controller authorizes/records without running repo code.
 Lodex's CLI, Console, history tools and other skills work independently of Herdr.
 
 Keep the manager in the source repo and give each worker its own task checkout.
@@ -300,6 +307,10 @@ For Codex, the suggested config names are `lodex-manager` and `lodex-worker`;
 these are config profiles, not Lodex commands or services. You start the manager
 with its profile; the manager then follows the skill to launch workers with theirs.
 Installing a skill does not configure or restart an agent.
+`worktree worker-config` drafts task-specific Codex permissions and routing from a
+successful prepare/grant without changing global settings. The launcher guards
+against a second writer; grant replacement requires stopped-worker resume with
+new settings. Restricted teardown uses `cleanup --worker-policy PATH`.
 
 Follow the [Herdr guide](docs/herdr.md) for role setup, an optional
 manager shortcut, dispatch, verification and cleanup. Keep Herdr's own skill
@@ -348,7 +359,7 @@ cd /absolute/path/to/lodex
 uv sync --locked
 pnpm --dir console/f2e install --frozen-lockfile
 uv build --all-packages
-uv tool install --force --reinstall --find-links dist dist/lodex-0.3.0-py3-none-any.whl
+uv tool install --force --reinstall --find-links dist dist/lodex-0.4.0-py3-none-any.whl
 lodex skill install lodex-history --dry-run
 lodex skill install lodex-history
 ```
@@ -356,7 +367,7 @@ lodex skill install lodex-history
 For an installation with Console, replace the `uv tool install` command above with:
 
 ```bash
-uv tool install --force --reinstall --find-links dist 'dist/lodex-0.3.0-py3-none-any.whl[console]'
+uv tool install --force --reinstall --find-links dist 'dist/lodex-0.4.0-py3-none-any.whl[console]'
 ```
 
 The installed console serves the assets bundled in its Server wheel. Editing the

@@ -279,7 +279,10 @@ def create(
         path.parent.mkdir(parents=True, exist_ok=True)
         git(common, "worktree", "add", "-b", branch, str(path), commit)
         try:
-            return _attach_locked(registry, project_id, path, source, owned=True, task_id=task_id)
+            task = _attach_locked(registry, project_id, path, source, owned=True, task_id=task_id)
+            task.update(base_commit=commit, base_ref=ref)
+            registry.put("taskenv", task)
+            return task
         except (ManagementError, OSError) as exc:
             # Preserve ownership when configuration fails after Git succeeds.
             task = {
@@ -287,6 +290,8 @@ def create(
                 "id": task_id,
                 "project": project_id,
                 "owned": True,
+                "base_commit": commit,
+                "base_ref": ref,
                 "ports": {},
                 "config_source": {
                     "method": "unavailable",

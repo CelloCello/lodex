@@ -1,7 +1,7 @@
 # Codex manager and worker setup
 
 Read this when either role uses Codex. The templates target the config-file
-profile and named permission-profile interfaces documented for Codex CLI 0.162.1;
+profile and named permission-profile interfaces inspected in Codex CLI 0.166.0;
 they are starting points, not portable guarantees for every version or OS.
 Check `codex --version`, `codex --help` and current official docs before adapting
 them. Do not pin the user's model or reasoning effort.
@@ -12,6 +12,60 @@ them. Do not pin the user's model or reasoning effort.
 - [MCP and other settings](https://learn.chatgpt.com/docs/config-file/config-reference)
 
 ## Inspect and propose
+
+The static worker template is a baseline, not a service-enabled launch policy.
+For the persistent A/B/C workflow, prepare the taskenv first, then draft:
+
+```sh
+lodex worktree worker-config --target TASKENV_ID \
+  --prepare-operation PREPARE_OPERATION_ID --profile lodex-worker \
+  --uv-cache /observed/uv/cache --delegation GRANT_ID \
+  --deny-socket /observed/herdr/control.sock --json
+```
+
+Omit `--delegation` for a project without delegated services. Repeat `--deny-socket`
+for runtime control sockets; include the active core control socket as well as
+any TUI socket. Use `--allow-host HOST` only for reviewed application access;
+localhost permission is not a taskenv-port boundary. Missing required service
+scripts or a changed prepare/grant recipe stop drafting. A changed grant requires
+a new draft and stopped-worker resume, not an in-place credential swap.
+
+`--deny-path /absolute/private/path` adds explicit read/write denials, for example
+other management roots or agent credential/history directories. Review more-specific
+rules when selecting such paths. After approval to trust this project's generated
+checkout, `--trust-checkout` marks only that checkout trusted through CLI overrides
+for this invocation; it does not save a global project-trust entry. It is off by
+default. An unapproved trust dialog is a setup question, not a reason to answer
+automatically or bypass sandbox/hook trust. Native resume still uses fresh settings.
+
+The command writes a 0600 snapshot under `LODEX_HOME/worker-policies`, returns its
+policy path and interpreter/agent/sandbox argv, and does not install/apply settings.
+The launcher selects the approved config file and adds a unique per-launch
+permission profile via CLI overrides. It preserves model/reasoning settings. No
+`CODEX_HOME` config/profile file is rewritten for each task. The user must review
+the concrete rules before their first application; subsequent task paths can use
+the same previously approved rule contract without repeated permission questions.
+
+The draft denies central/peer data, reopens only the assigned checkout, its own
+grant/runtime and reviewed cache, makes shared Git metadata read-only, and uses
+private task temp. It enables network proxy enforcement with an explicit Unix
+allowlist; with no `--allow-host`, no application TCP host is allowed. This is
+different from merely setting Unix rules while disabling the proxy.
+
+It disables apps/plugins at the feature gate as well as discovered entries,
+the implicit `codex_worktrees` MCP namespace, image generation, web search,
+hooks, JS REPL and subagents. Codex 0.166 can expose worktree tools without a
+local MCP entry; disabling only discovered entries is insufficient. The draft
+uses a disabled transport for that implicit namespace, never an active server.
+These broad tool defaults are reviewable draft
+behavior, not proof every host/managed capability was found. In particular,
+disabling hooks may omit TUI integration metadata. Validate actual tools and
+native session identification; do not keep a Herdr-control hook as a hidden
+worker escape hatch. Legacy sandbox keys in inspected settings fail drafting
+because they can override named permissions. Managed/remote settings and other
+execution surfaces still require actual-session inspection. See official
+[permissions](https://learn.chatgpt.com/docs/permissions) and
+[environment/tool configuration](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 Resolve the actual source checkout, Git common directory, Lodex state root and
 Herdr session socket. Use `git rev-parse --path-format=absolute --git-common-dir`
@@ -85,6 +139,11 @@ different setup choice; do not silently reset it or keep unnecessary grants.
   must not clean/prune the shared cache or edit its internals. The manager
   coordinates maintenance through uv when other uv commands are stopped; uv
   0.6.6 does not support concurrent cleanup. See [uv cache safety](https://docs.astral.sh/uv/concepts/cache/#cache-safety).
+- Optional [service delegation](service-delegation.md) needs separately reviewed
+  access to its returned runtime root and Unix sockets. Protect central state and
+  other grants from reads as well as writes; keep access to the assigned checkout.
+  The baseline template does not enable this. A helper's `--allow-unix-socket`
+  probe is not proof that an agent loaded equivalent profile settings.
 - Worker `approval_policy = "never"` keeps denied shell operations from waiting
   for interactive approval; it does not grant access or prevent all user questions.
   Workers report missing capabilities to the manager. Prepare dependencies first.
@@ -143,19 +202,21 @@ If the current manager has insufficient permissions, provide this restart/handof
 instruction and preserve task context. Do not launch an unrestricted replacement
 from a restricted session to work around its controls.
 
-For each taskenv, follow the Herdr skill to create an available shell pane using
-the checkout path as `--cwd`. Use its returned ID to launch:
+For each worker, use the generated policy's `launcher_argv` with its policy path
+and task file through the selected [TUI](tui.md#interactive-worker) or
+[core/App](core.md#interactive-worker) adapter. Those adapters start the shared
+launch guard in the assigned checkout; the guard applies the generated policy
+and holds the taskenv's writer lock. A direct `herdr agent start` with only the
+static worker profile omits these protections and the delegated service route.
 
-```bash
-herdr agent start "$agent_name" --kind codex --pane "$pane_id" -- \
-  -p "$worker_profile" -C "$taskenv_path"
-```
-
-Pass only observed, shell-quoted values. Check `herdr agent` for installed syntax.
-Do not pass `--worktree`, omit `-p` on error, or append sandbox/approval overrides
-that undo the approved profile. Reusing a Codex session requires checking that
-its effective cwd and permissions still match; do not assume resume adopts new
-profile contents. Agents already running before setup need separate reconciliation.
+Use observed paths/IDs and an argument array or correctly shell-quoted command.
+Do not pass `--worktree`, drop generated policy arguments on error, or add overrides
+that undo the reviewed settings. For continuation, follow [lifecycle](lifecycle.md):
+stop the old worker, then launch the new policy with its original native UUID.
+The guard verifies checkout ownership before first binding and rejects a different
+UUID once one is recorded. Check effective cwd and permissions after resume;
+agents already running outside the guard need separate
+reconciliation before this workflow can claim single-writer protection.
 
 ## Validate before relying on isolation
 
