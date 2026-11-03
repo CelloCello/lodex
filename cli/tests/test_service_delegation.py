@@ -241,7 +241,23 @@ def test_manager_cli_retries_retained_acks_without_stopping_replacement(
     assert invoke("stop")["state"] == "stopped"
 
 
-def test_malformed_supervisor_reply_cannot_break_delegation_or_console(delegated: Any) -> None:
+@pytest.mark.parametrize(
+    ("reply", "error_codes"),
+    [
+        pytest.param(b"not-json", {"unknown_service"}, id="invalid-json"),
+        pytest.param(b"[]", {"invalid_service_record"}, id="invalid-status"),
+        # Deep JSON can be rejected by the decoder or the status validator,
+        # depending on the Python runtime. Both must fail closed.
+        pytest.param(
+            b"[" * 1500 + b"]" * 1500,
+            {"unknown_service", "invalid_service_record"},
+            id="deep-json",
+        ),
+    ],
+)
+def test_malformed_supervisor_reply_cannot_break_delegation_or_console(
+    delegated: Any, reply: bytes, error_codes: set[str]
+) -> None:
     from lodex_console.actions import overview
 
     a, b = delegated["infos"]
@@ -267,7 +283,7 @@ def test_malformed_supervisor_reply_cannot_break_delegation_or_console(delegated
                 with connection:
                     connection.settimeout(1)
                     connection.recv(4096)
-                    connection.sendall(b"[" * 1500 + b"]" * 1500)
+                    connection.sendall(reply)
 
         worker = threading.Thread(target=malformed_replies)
         worker.start()
@@ -276,7 +292,7 @@ def test_malformed_supervisor_reply_cannot_break_delegation_or_console(delegated
             assert client_a.perform("list", None, None)[0]["state"] == "unknown"
             with pytest.raises(ManagementError) as rejected:
                 client_a.request("stop", "job")
-            assert rejected.value.code == "unknown_service"
+            assert rejected.value.code in error_codes
             snapshot = overview(delegated["store"].root)
             states = {task["id"]: task["services"][0]["state"] for task in snapshot["taskenvs"]}
             assert states[a["taskenv"]] == "unknown" and states[b["taskenv"]] == "running"
