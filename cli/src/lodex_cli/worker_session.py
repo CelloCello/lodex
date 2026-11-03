@@ -243,7 +243,7 @@ def run(policy_path: Path, kind: str, task_file: Path, resume: str | None = None
     runtime = runtime_context(kind)
     if resume is not None:
         try:
-            uuid.UUID(resume)
+            resume = str(uuid.UUID(resume))
         except ValueError as exc:
             raise ManagementError(
                 "native_session", "Pass the observed native session UUID, not --last"
@@ -282,6 +282,7 @@ def run(policy_path: Path, kind: str, task_file: Path, resume: str | None = None
             raise ManagementError(
                 "worker_active", "This taskenv already has an active worker"
             ) from exc
+        saved_session = None
         if record_path.exists():
             previous = read_json(record_path)
             if previous["state"] == "running":
@@ -289,6 +290,19 @@ def run(policy_path: Path, kind: str, task_file: Path, resume: str | None = None
                     "worker_unknown",
                     "Previous exit is unconfirmed; inspect its saved runtime before recovery",
                 )
+            saved_session = previous.get("native_session")
+            if resume is not None and saved_session is not None:
+                try:
+                    saved_session = str(uuid.UUID(saved_session))
+                except (ValueError, TypeError, AttributeError) as exc:
+                    raise ManagementError(
+                        "native_session", "Cannot verify the saved native session UUID"
+                    ) from exc
+                if resume != saved_session:
+                    raise ManagementError(
+                        "session_resume_mismatch",
+                        "Requested native session UUID does not match this taskenv's saved session",
+                    )
             if resume is None and (
                 previous.get("native_session") is not None
                 or not (
@@ -303,6 +317,17 @@ def run(policy_path: Path, kind: str, task_file: Path, resume: str | None = None
             ):
                 raise ManagementError(
                     "session_resume_required", "Use the observed native session ID to continue"
+                )
+        if resume is not None and saved_session is None:
+            observed = native_storage(policy)
+            if observed is None:
+                raise ManagementError(
+                    "native_session_unverified",
+                    "Cannot verify this taskenv's native session storage",
+                )
+            if resume not in {str(uuid.UUID(identity)) for identity in observed["native_ids"]}:
+                raise ManagementError(
+                    "native_session_scope", "Native session UUID is not recorded for this taskenv"
                 )
         arguments = list(policy["agent_argv"])
         if resume is not None:

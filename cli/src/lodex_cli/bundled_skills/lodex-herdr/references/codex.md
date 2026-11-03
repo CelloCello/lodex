@@ -202,19 +202,21 @@ If the current manager has insufficient permissions, provide this restart/handof
 instruction and preserve task context. Do not launch an unrestricted replacement
 from a restricted session to work around its controls.
 
-For each taskenv, follow the Herdr skill to create an available shell pane using
-the checkout path as `--cwd`. Use its returned ID to launch:
+For each worker, use the generated policy's `launcher_argv` with its policy path
+and task file through the selected [TUI](tui.md#interactive-worker) or
+[core/App](core.md#interactive-worker) adapter. Those adapters start the shared
+launch guard in the assigned checkout; the guard applies the generated policy
+and holds the taskenv's writer lock. A direct `herdr agent start` with only the
+static worker profile omits these protections and the delegated service route.
 
-```bash
-herdr agent start "$agent_name" --kind codex --pane "$pane_id" -- \
-  -p "$worker_profile" -C "$taskenv_path"
-```
-
-Pass only observed, shell-quoted values. Check `herdr agent` for installed syntax.
-Do not pass `--worktree`, omit `-p` on error, or append sandbox/approval overrides
-that undo the approved profile. Reusing a Codex session requires checking that
-its effective cwd and permissions still match; do not assume resume adopts new
-profile contents. Agents already running before setup need separate reconciliation.
+Use observed paths/IDs and an argument array or correctly shell-quoted command.
+Do not pass `--worktree`, drop generated policy arguments on error, or add overrides
+that undo the reviewed settings. For continuation, follow [lifecycle](lifecycle.md):
+stop the old worker, then launch the new policy with its original native UUID.
+The guard verifies checkout ownership before first binding and rejects a different
+UUID once one is recorded. Check effective cwd and permissions after resume;
+agents already running outside the guard need separate
+reconciliation before this workflow can claim single-writer protection.
 
 ## Validate before relying on isolation
 

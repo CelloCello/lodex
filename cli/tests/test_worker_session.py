@@ -35,6 +35,17 @@ def fixture_program(policy: dict[str, Any], directory: Path) -> None:
     write_private(Path(policy["policy_file"]), json.dumps(policy))
 
 
+def record_native_session(policy: dict[str, Any]) -> str:
+    identity = str(uuid.uuid4())
+    path = Path(policy["launch_env"]["CODEX_HOME"]) / "sessions" / f"rollout-{identity}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"type": "session_meta", "payload": {"id": identity, "cwd": policy["path"]}})
+        + "\n"
+    )
+    return identity
+
+
 def launch(
     policy: dict[str, Any], task_file: Path, kind: str, resume: str | None = None
 ) -> subprocess.Popen[str]:
@@ -122,7 +133,7 @@ def test_launch_guard_preserves_interaction_and_resumes_after_new_grant(
         **{**draft["arguments"], "delegation": replacement["id"]},
     )
     fixture_program(fresh, tmp_path)
-    native_session = str(uuid.uuid4())
+    native_session = record_native_session(fresh)
     task_file.write_text("Continue from the saved task state; do not repeat completed steps")
     resumed = launch(fresh, task_file, kind, native_session)
     try:
@@ -155,6 +166,118 @@ def test_unknown_exit_does_not_automatically_launch_second_writer(
 
 
 @pytest.mark.parametrize("kind", ["tui", "core"])
+@pytest.mark.parametrize("state", ["exited", "launch_failed"])
+def test_resume_rejects_another_native_session_without_changing_saved_records(
+    delegated: Any, draft: Any, tmp_path: Path, kind: str, state: str
+) -> None:
+    policy = draft["policy"]
+    task_file = tmp_path / "task.txt"
+    task_file.write_text("Continue the original conversation only")
+    fixture_program(policy, tmp_path)
+    directory = delegated["store"].root / "worker-sessions"
+    state_file = directory / f"{policy['taskenv']}.json"
+    peer_file = directory / f"{delegated['tasks'][1]['id']}.json"
+    native_session, peer_session = str(uuid.uuid4()), str(uuid.uuid4())
+    write_private(state_file, json.dumps({"state": state, "native_session": native_session}))
+    write_private(peer_file, json.dumps({"state": "running", "native_session": peer_session}))
+    original, peer_original = state_file.read_bytes(), peer_file.read_bytes()
+
+    rejected = launch(policy, task_file, kind, peer_session)
+    _, error = rejected.communicate(timeout=10)
+    assert rejected.returncode == 1 and "does not match" in error
+    assert state_file.read_bytes() == original
+    assert peer_file.read_bytes() == peer_original
+    assert not (Path(policy["path"]) / "fixture-arguments.json").exists()
+
+    resumed = launch(policy, task_file, kind, native_session)
+    try:
+        assert line(resumed) == "fixture-ready"
+        arguments = json.loads((Path(policy["path"]) / "fixture-arguments.json").read_text())
+        assert arguments[-4:] == ["resume", native_session, "--", task_file.read_text()]
+    finally:
+        finish(resumed)
+    assert json.loads(state_file.read_text())["native_session"] == native_session
+    assert peer_file.read_bytes() == peer_original
+
+
+@pytest.mark.parametrize("kind", ["tui", "core"])
+def test_resume_matches_uuid_identity_across_equivalent_spellings(
+    delegated: Any, draft: Any, tmp_path: Path, kind: str
+) -> None:
+    policy = draft["policy"]
+    task_file = tmp_path / "task.txt"
+    task_file.write_text("Continue the same UUID using canonical spelling")
+    fixture_program(policy, tmp_path)
+    state_file = delegated["store"].root / "worker-sessions" / f"{policy['taskenv']}.json"
+    native_session = str(uuid.uuid4())
+    write_private(
+        state_file, json.dumps({"state": "exited", "native_session": native_session.upper()})
+    )
+    resumed = launch(policy, task_file, kind, native_session.replace("-", ""))
+    try:
+        assert line(resumed) == "fixture-ready"
+        arguments = json.loads((Path(policy["path"]) / "fixture-arguments.json").read_text())
+        assert arguments[-4:] == ["resume", native_session, "--", task_file.read_text()]
+    finally:
+        finish(resumed)
+    assert json.loads(state_file.read_text())["native_session"] == native_session
+
+
+@pytest.mark.parametrize("kind", ["tui", "core"])
+@pytest.mark.parametrize("state", [None, "exited", "launch_failed"])
+def test_first_resume_rejects_unverified_candidates_then_accepts_own_session(
+    delegated: Any, draft: Any, tmp_path: Path, kind: str, state: str | None
+) -> None:
+    policy = draft["policy"]
+    task_file = tmp_path / "task.txt"
+    task_file.write_text("Resume the verified original conversation")
+    state_file = delegated["store"].root / "worker-sessions" / f"{policy['taskenv']}.json"
+    if state is not None:
+        write_private(state_file, json.dumps({"state": state, "native_session": None}))
+    original = state_file.read_bytes() if state_file.exists() else None
+    native_session = record_native_session(policy)
+    peer_session = record_native_session({**policy, "path": delegated["tasks"][1]["path"]})
+    policy["agent_argv"] = [
+        sys.executable,
+        "-I",
+        "-c",
+        "from pathlib import Path;Path('unexpected-child').touch();raise SystemExit(2)",
+    ]
+    write_private(Path(policy["policy_file"]), json.dumps(policy))
+
+    for candidate in (str(uuid.uuid4()), peer_session):
+        rejected = launch(policy, task_file, kind, candidate)
+        _, error = rejected.communicate(timeout=10)
+        assert rejected.returncode == 1 and "not recorded for this taskenv" in error
+        assert (state_file.read_bytes() if state_file.exists() else None) == original
+        assert not (Path(policy["path"]) / "unexpected-child").exists()
+
+    profile = draft["codex_home"] / "fixture.config.toml"
+    configuration = profile.read_text()
+    profile.write_text(configuration + f"sqlite_home={json.dumps(str(tmp_path))}\n")
+    try:
+        rejected = launch(policy, task_file, kind, native_session)
+        _, error = rejected.communicate(timeout=10)
+        assert rejected.returncode == 1 and "Cannot verify" in error
+        assert (state_file.read_bytes() if state_file.exists() else None) == original
+        assert not (Path(policy["path"]) / "unexpected-child").exists()
+    finally:
+        profile.write_text(configuration)
+
+    fixture_program(policy, tmp_path)
+    resumed = launch(policy, task_file, kind, native_session)
+    try:
+        assert line(resumed) == "fixture-ready"
+        assert json.loads(state_file.read_text())["native_session"] == native_session
+        duplicate = launch(policy, task_file, kind, native_session)
+        _, error = duplicate.communicate(timeout=10)
+        assert duplicate.returncode == 1 and "active worker" in error
+    finally:
+        finish(resumed)
+    assert json.loads(state_file.read_text())["native_session"] == native_session
+
+
+@pytest.mark.parametrize("kind", ["tui", "core"])
 @pytest.mark.parametrize("resuming", [False, True])
 def test_known_spawn_failure_can_retry_without_losing_resume_requirement(
     delegated: Any, draft: Any, tmp_path: Path, kind: str, resuming: bool
@@ -162,7 +285,7 @@ def test_known_spawn_failure_can_retry_without_losing_resume_requirement(
     policy = draft["policy"]
     task_file = tmp_path / "task.txt"
     task_file.write_text("Continue only after the reviewed launch is repaired")
-    native_session = str(uuid.uuid4()) if resuming else None
+    native_session = record_native_session(policy) if resuming else None
     state_file = delegated["store"].root / "worker-sessions" / f"{policy['taskenv']}.json"
     if resuming:
         write_private(state_file, json.dumps({"state": "exited"}))
@@ -234,7 +357,7 @@ def test_exit_before_native_session_allows_only_initial_launch_to_retry(
     task_file = tmp_path / "task.txt"
     task_file.write_text("Retry only a confirmed pre-session startup failure")
     state_file = delegated["store"].root / "worker-sessions" / f"{policy['taskenv']}.json"
-    native_session = str(uuid.uuid4()) if resuming else None
+    native_session = record_native_session(policy) if resuming else None
     if resuming:
         write_private(state_file, json.dumps({"state": "exited"}))
     policy["agent_argv"] = [sys.executable, "-I", "-c", "raise SystemExit(2)"]
@@ -523,7 +646,7 @@ def test_task_text_cannot_be_interpreted_as_native_cli_options(
     fixture_program(policy, tmp_path)
     task_file = tmp_path / "task.txt"
     task_file.write_text("--dangerously-bypass-approvals-and-sandbox")
-    native = str(uuid.uuid4()) if resuming else None
+    native = record_native_session(policy) if resuming else None
     if resuming:
         write_private(
             delegated["store"].root / "worker-sessions" / f"{policy['taskenv']}.json",

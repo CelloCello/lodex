@@ -21,6 +21,13 @@ from closing its terminal. Check the chosen runtime's close/parent behavior.
    that launch, retry under the same writer guard: a first launch needs no native
    UUID, while a failed resume still needs its original UUID. A program that was
    created but whose exit could not be confirmed remains blocked.
+   Once a native UUID is recorded, a different UUID is rejected before launching
+   or changing that record; equivalent UUID spellings identify the same session.
+   Before the first binding, the guard checks that the UUID is recorded for this
+   checkout in the supported local native storage. Missing/peer IDs or unverifiable
+   storage leave the previous record untouched, so a rejected candidate cannot
+   prevent a corrected retry. A verified UUID remains bound even if launching its
+   resume fails; repair and retry with that same UUID.
    A child can also exit before creating a native conversation. For an initial
    launch with a positive exit code, the guard records `native_admission=absent`
    only when its before/after local-storage receipts match and no native ID for

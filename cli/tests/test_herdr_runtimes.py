@@ -13,7 +13,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import uuid
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -26,7 +25,7 @@ from lodex_core.management.delegation import Client
 
 from .test_service_delegation import delegated as delegated
 from .test_worker_policy import draft as draft
-from .test_worker_session import fixture_program
+from .test_worker_session import fixture_program, record_native_session
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("LODEX_TEST_HERDR_RUNTIME") != "1",
@@ -340,7 +339,7 @@ def test_actual_runtime_launches_guard_with_taskenv_cwd_and_first_task(
         **{**draft["arguments"], "delegation": fresh_grant["id"]},
     )
     fixture_program(fresh, root)
-    native_session = str(uuid.uuid4())
+    native_session = record_native_session(fresh)
     task_file.write_text(
         "Continue the fixture task from saved context; do not repeat completed work"
     )
