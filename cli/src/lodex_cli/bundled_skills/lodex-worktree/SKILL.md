@@ -1,7 +1,14 @@
 ---
 name: lodex-worktree
-description: Create, attach, inspect or remove local Git task environments with Lodex. Use for explicit local environment management, not history search or task tracking.
+description: Create, attach, inspect or remove Lodex task environments on explicit request or within the same authorized task. Default ordinary development to the current repo.
 ---
+
+Work in the current repo/checkout by default. Enter this workflow only on explicit
+user request. Prior authorization continues only for the same task and within its
+original environment and operation scope. Installed tools, `.lodex` files and
+ordinary coding, testing or parallel work do not authorize taskenv setup
+(registration, attachment, checkout creation or `prepare`). Inspection alone
+does not authorize setup or service startup.
 
 Use the installed `lodex` CLI, with `--json` for machine-readable results.
 Resolve the current caller's absolute directory every time; there is no global current environment.

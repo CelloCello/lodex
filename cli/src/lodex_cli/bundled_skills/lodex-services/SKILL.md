@@ -1,7 +1,14 @@
 ---
 name: lodex-services
-description: Start, inspect, read logs and stop Lodex-managed taskenv services in management or delegated worker sessions. Use existing project configuration for local service lifecycle operations.
+description: Operate Lodex-managed services on explicit request or within the same authorized taskenv work. Default ordinary service startup to the current repo's existing commands.
 ---
+
+Use the current repo's existing commands by default. Operate Lodex services only
+on explicit user request or within the same authorized task, retaining its
+original environment and operation scope, including delegation limits. Installed
+tools, `.lodex` files or a dev-server request do not authorize taskenv setup.
+Missing registration does not authorize creating or preparing an environment;
+inspect/log requests do not authorize service startup.
 
 Operate services the taskenv owns and is authorized to stop/restart. Shared DBs
 or other external dependencies may be connection settings owned elsewhere; follow

@@ -1,7 +1,14 @@
 ---
 name: lodex-project-setup
-description: Connect a repository's existing startup, settings and resource choices to Lodex. Use for initial project setup or configuration changes, including shared dependencies and repositories without services.
+description: Configure Lodex integration on explicit request or within the same authorized task. Default ordinary project setup to the current repo's existing tools.
 ---
+
+Work in the current repo/checkout by default. Configure Lodex only on explicit
+user request or within the same authorized task, retaining its original
+environment and operation scope. Installed tools or `.lodex` files do not
+authorize activation. Recipe edits/reviews alone do not authorize registration,
+attachment, checkout creation, `prepare` or service startup; these require a
+requested live setup/trial.
 
 Inspect applicable AGENTS.md, README, configuration loaders, existing scripts and
 Compose files before editing `.lodex/project.toml`. Preserve established choices;
@@ -100,9 +107,11 @@ Registration, prepare and central secret management need management access. In a
 restricted B/C session, return proposed recipe changes and trial needs to A for
 review/preparation and grant renewal; keep the worker's execution boundary intact.
 
-Register and attach before trialing authorized actions. Run only declared commands
-and authorized trials. `lodex run NAME` executes
-the repo-defined `[commands.NAME]`; registration does not start services:
+For a user-requested live Lodex setup/trial, register and attach if needed before
+trialing authorized actions. For recipe-only work, validate configuration and
+scripts without activating a taskenv. Run only declared commands and authorized
+trials. `lodex run NAME` executes the repo-defined `[commands.NAME]`;
+registration does not start services:
 
 ```
 lodex project add NAME /absolute/repo --json

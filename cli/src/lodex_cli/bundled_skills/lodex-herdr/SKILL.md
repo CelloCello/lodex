@@ -1,9 +1,15 @@
 ---
 name: lodex-herdr
-description: Set up or coordinate persistent coding-agent sessions in Lodex task environments through Herdr TUI or herdr-core/App, with scoped service control. Use for the combined workflow and parallel tasks, not standalone history search or ordinary worktree management.
+description: Coordinate coding agents through Lodex and Herdr on explicit request or within the same authorized task. Default ordinary and parallel work to the current repo.
 ---
 
 # Lodex + Herdr
+
+Work in the current repo/checkout by default. Enter this combined workflow only
+on explicit user request. Prior authorization continues only for the same task
+and within its original environment and operation scope. Parallel work,
+delegation, Herdr use or installed Lodex configuration alone does not authorize
+taskenv setup or service startup. Apply the steps below only within that scope.
 
 Keep session A in the source checkout. A prepares taskenvs and coordinates;
 B/C are interactive sessions in distinct Lodex checkouts. The user can work in
@@ -21,8 +27,8 @@ Read [Codex settings](references/codex.md) for Codex. Other agents need their ow
 validated permission/launch contract; `worker-config` currently drafts Codex only.
 Inspect installed help and effective tools. Do not substitute an agent, pin its
 model, replace global defaults or install profiles without the applicable approval.
-Standing approval for a reviewed setup can cover generated paths for subsequent
-tasks within that scope; a new host/tool/root or wider grant needs scoped review.
+Within a user-requested workflow, an already reviewed setup can cover generated
+paths in its approved scope; a new host/tool/root or wider grant needs review.
 
 Choose the runtime reference before live control:
 
