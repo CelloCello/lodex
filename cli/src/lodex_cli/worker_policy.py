@@ -84,7 +84,9 @@ def render(
     trust_checkout: bool = False,
 ) -> dict[str, Any]:
     """Create a protected settings snapshot. Does not launch or approve anything."""
+    registry.reload_task(task)
     root = worktrees.require_present(task)
+    worktrees.require_prepared(task)
     preparation = registry.get("operation", prepare_operation)
     if (
         preparation["taskenv"] != task["id"]
@@ -93,6 +95,8 @@ def render(
         or "handoff" not in preparation
     ):
         raise ManagementError("worker_unprepared", "Select a successful prepare for this taskenv")
+    if preparation["handoff"].get("binding_revision", 0) != task.get("binding_revision", 0):
+        raise ManagementError("worker_unprepared", "Environment was rebound; select a new prepare")
     config = load(root / CONFIG)
     if preparation["handoff"].get("configuration_digest") != digest(config):
         raise ManagementError(
@@ -202,11 +206,11 @@ def render(
     overrides.extend(f"{key}={toml_value(value)}" for key, value in policy.items())
     arguments = [argument for override in overrides for argument in ("-c", override)]
     result = {
-        "version": 1,
+        "version": 2,
         "id": identity,
         "taskenv": task["id"],
         "path": str(root),
-        "task_identity": {key: task[key] for key in ("inode", "git_inode", "common_inode")},
+        "task_identity": worktrees.binding(task),
         "runtime_root": str(runtime),
         "profile": profile,
         "launch_env": {"CODEX_HOME": str(codex_home)},
@@ -238,6 +242,7 @@ def render(
 
 def read(registry: Registry, task: dict[str, Any], path: Path) -> dict[str, Any]:
     """Only a manager-owned, task-bound policy can wrap administrative cleanup."""
+    registry.reload_task(task)
     expected = registry.root / "worker-policies"
     if path.is_symlink() or path.parent != expected or path.resolve().parent != expected:
         raise ManagementError("worker_policy", "Select a protected Lodex worker policy")
@@ -246,14 +251,14 @@ def read(registry: Registry, task: dict[str, Any], path: Path) -> dict[str, Any]
         raise ManagementError("worker_policy", "Worker policy must be a private regular file")
     data = read_json(path)
     if (
-        data.get("version") != 1
+        data.get("version") != 2
         or data.get("taskenv") != task["id"]
         or data.get("path") != task["path"]
     ):
-        raise ManagementError("worker_policy", "Policy belongs to another taskenv")
-    if data.get("task_identity") != {
-        key: task[key] for key in ("inode", "git_inode", "common_inode")
-    }:
-        raise ManagementError("identity_changed", "Worker policy identity changed")
+        raise ManagementError(
+            "worker_policy", "Unsupported or unrelated worker policy; regenerate it"
+        )
+    if data.get("task_identity") != worktrees.binding(task):
+        raise ManagementError("identity_changed", "Worker policy binding changed; regenerate it")
     worktrees.require_present(task)
     return data

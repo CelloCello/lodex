@@ -31,6 +31,45 @@ def post(api: TestClient, **fields: Any) -> dict[str, Any]:
     return dict(payload["result"])
 
 
+def test_attach_rebind_api_preserves_registration_until_confirmation(
+    registry: Registry, repo: Path
+) -> None:
+    worktrees.project_add(registry, "fixture", repo, None)
+    task = worktrees.attach(registry, "fixture", repo)
+    task["git_dir"] += "-old"
+    registry.put("taskenv", task)
+    with client(registry.root) as api:
+        state = api.get("/api/state").json()["result"]["taskenvs"][0]
+        assert state["id"] == task["id"] and state["state"] == "identity_changed"
+        registry.put("operation", {"id": "unknown-op", "taskenv": task["id"], "state": "unknown"})
+        preview = post(
+            api, action="worktree.attach", project="fixture", path=str(repo), rebind=True
+        )
+        assert not preview["rebound"] and registry.get("taskenv", task["id"]) == task
+        assert preview["required_acknowledgements"] == ["unknown-op"]
+        blocked = api.post(
+            "/api/action",
+            json={
+                "action": "worktree.attach",
+                "project": "fixture",
+                "path": str(repo),
+                "rebind": True,
+                "yes": True,
+            },
+        ).json()
+        assert blocked["error"]["code"] == "unresolved_operations"
+        result = post(
+            api,
+            action="worktree.attach",
+            project="fixture",
+            path=str(repo),
+            rebind=True,
+            yes=True,
+            acknowledge_operations=["unknown-op"],
+        )
+        assert result["rebound"] and result["id"] == task["id"] and not result["owned"]
+
+
 def test_empty_console_is_read_only_and_requires_local_auth(tmp_path: Path) -> None:
     root = tmp_path / "absent"
     with client(root) as api:

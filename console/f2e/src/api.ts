@@ -60,6 +60,8 @@ export type Overview = {
   secrets: string[];
 };
 export type Action = {
+  rebind?: boolean;
+  acknowledge_operations?: string[];
   action: string;
   target?: string;
   name?: string;

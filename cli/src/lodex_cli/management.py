@@ -138,11 +138,38 @@ def worktree_create(
 
 @worktree_app.command("attach")
 def worktree_attach(
-    ctx: typer.Context, project: str, path: Path, config: Config = None, as_json: Json = False
+    ctx: typer.Context,
+    project: str,
+    path: Path,
+    config: Config = None,
+    as_json: Json = False,
+    rebind: Annotated[
+        bool, typer.Option(help="Preview rebinding an existing environment at this path.")
+    ] = False,
+    yes: Yes = False,
+    acknowledge_operation: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--acknowledge-operation",
+            help="Confirm a stopped operation's unknown outcome; repeat per ID.",
+        ),
+    ] = None,
 ) -> int:
-    """Register an existing checkout without taking ownership."""
+    """Register a checkout, or preview/confirm rebinding an existing environment."""
     with registry() as store:
-        return management_result(ctx, worktrees.attach(store, project, path, config), as_json)
+        return management_result(
+            ctx,
+            worktrees.attach(
+                store,
+                project,
+                path,
+                config,
+                rebind=rebind,
+                yes=yes,
+                acknowledge_operations=acknowledge_operation,
+            ),
+            as_json,
+        )
 
 
 @worktree_app.command("worker-config")

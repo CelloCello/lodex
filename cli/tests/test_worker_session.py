@@ -8,6 +8,8 @@ import sqlite3
 import subprocess
 import sys
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -15,7 +17,10 @@ from unittest.mock import Mock
 import pytest
 
 from lodex_cli import worker_policy, worker_session
+from lodex_core.management import worktrees
 from lodex_core.management.common import ManagementError, write_private
+from lodex_core.management.delegation import revoke
+from lodex_core.management.worker_sessions import session_lock
 
 from .test_service_delegation import delegated as delegated
 from .test_worker_policy import draft as draft
@@ -94,6 +99,57 @@ def finish(process: subprocess.Popen[str]) -> None:
     for stream in (process.stdin, process.stdout, process.stderr):
         if stream is not None:
             stream.close()
+
+
+def test_worker_validates_binding_while_holding_the_shared_session_lock(
+    delegated: Any, draft: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, task = delegated["store"], delegated["tasks"][0]
+    policy = draft["policy"]
+    policy["delegation"] = None
+    policy["agent_argv"] = [sys.executable, "-c", "pass"]
+    write_private(Path(policy["policy_file"]), json.dumps(policy))
+    original = worker_policy.read
+    checked = []
+
+    def read_locked(*args: Any) -> dict[str, Any]:
+        with pytest.raises(ManagementError) as busy, session_lock(store.root, task["id"]):
+            pytest.fail("Worker policy validation is outside the session lock")
+        assert busy.value.code == "worker_active"
+        checked.append(True)
+        return original(*args)
+
+    monkeypatch.setattr(worker_policy, "read", read_locked)
+    monkeypatch.setattr(worker_session, "runtime_context", lambda _: {"kind": "fixture"})
+    prompt = tmp_path / "task.txt"
+    prompt.write_text("fixture")
+    assert worker_session.run(Path(policy["policy_file"]), "core", prompt) == 0
+    assert checked == [True]
+
+
+def test_rebind_winning_launch_race_invalidates_policy_before_worker_spawn(
+    delegated: Any, draft: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, task = delegated["store"], delegated["tasks"][0]
+    revoke(store, delegated["infos"][0]["id"])
+    policy = draft["policy"]
+    policy["delegation"] = None
+    write_private(Path(policy["policy_file"]), json.dumps(policy))
+
+    @contextmanager
+    def rebind_first(root: Path, task_id: str) -> Iterator[Path]:
+        worktrees.attach(store, task["project"], Path(task["path"]), rebind=True, yes=True)
+        with session_lock(root, task_id) as record:
+            yield record
+
+    monkeypatch.setattr(worker_session, "session_lock", rebind_first)
+    monkeypatch.setattr(worker_session, "runtime_context", lambda _: {"kind": "fixture"})
+    prompt = tmp_path / "task.txt"
+    prompt.write_text("fixture")
+    with pytest.raises(ManagementError) as stale:
+        worker_session.run(Path(policy["policy_file"]), "core", prompt)
+    assert stale.value.code == "identity_changed"
+    assert not (store.root / "worker-sessions" / f"{task['id']}.json").exists()
 
 
 @pytest.mark.parametrize("kind", ["tui", "core"])

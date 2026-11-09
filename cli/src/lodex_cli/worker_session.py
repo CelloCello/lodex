@@ -24,11 +24,12 @@ from pathlib import Path
 from typing import Any
 
 from lodex_cli import worker_policy
-from lodex_core.management.common import ManagementError, now, private_dir, read_json, write_private
+from lodex_core.management.common import ManagementError, now, read_json, write_private
 from lodex_core.management.delegation import KIND, Client
 from lodex_core.management.environment import process_env
 from lodex_core.management.project_config import CONFIG, digest, load
 from lodex_core.management.store import Registry
+from lodex_core.management.worker_sessions import session_lock
 
 
 def native_storage(policy: dict[str, Any]) -> dict[str, Any] | None:
@@ -238,8 +239,6 @@ def runtime_context(kind: str) -> dict[str, str]:
 def run(policy_path: Path, kind: str, task_file: Path, resume: str | None = None) -> int:
     if os.name != "posix":
         raise ManagementError("runtime_platform", "This launch guard requires POSIX advisory locks")
-    import fcntl
-
     runtime = runtime_context(kind)
     if resume is not None:
         try:
@@ -254,145 +253,145 @@ def run(policy_path: Path, kind: str, task_file: Path, resume: str | None = None
     try:
         raw = read_json(policy_path)
         task = store.get("taskenv", raw["taskenv"])
-        policy = worker_policy.read(store, task, policy_path)
-        if digest(load(Path(task["path"]) / CONFIG)) != policy["handoff"]["configuration_digest"]:
-            raise ManagementError(
-                "worker_unprepared", "Recipe changed after preparation; review it"
-            )
-        if policy["delegation"] is not None:
-            grant = store.get(KIND, policy["delegation"])
-            if not grant["active"] or grant["taskenv"] != task["id"]:
-                raise ManagementError("delegation_revoked", "Review and render the new delegation")
-            Client(Path(policy["routes"]["LODEX_SERVICE_DELEGATION"])).request(
-                "list", target=task["id"]
-            )
-    finally:
-        store.close()
-    # The task is supplied explicitly by A, not copied from a shared conversation.
-    prompt = task_file.read_text()
-    if not prompt.strip():
-        raise ManagementError("task_prompt", "Provide the task and handoff context")
-    directory = policy_path.parent.parent / "worker-sessions"
-    private_dir(directory)
-    record_path = directory / f"{task['id']}.json"
-    with (directory / f"{task['id']}.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise ManagementError(
-                "worker_active", "This taskenv already has an active worker"
-            ) from exc
-        saved_session = None
-        if record_path.exists():
-            previous = read_json(record_path)
-            if previous["state"] == "running":
-                raise ManagementError(
-                    "worker_unknown",
-                    "Previous exit is unconfirmed; inspect its saved runtime before recovery",
-                )
-            saved_session = previous.get("native_session")
-            if resume is not None and saved_session is not None:
-                try:
-                    saved_session = str(uuid.UUID(saved_session))
-                except (ValueError, TypeError, AttributeError) as exc:
-                    raise ManagementError(
-                        "native_session", "Cannot verify the saved native session UUID"
-                    ) from exc
-                if resume != saved_session:
-                    raise ManagementError(
-                        "session_resume_mismatch",
-                        "Requested native session UUID does not match this taskenv's saved session",
-                    )
-            if resume is None and (
-                previous.get("native_session") is not None
-                or not (
-                    previous["state"] == "launch_failed"
-                    or (
-                        previous["state"] == "exited"
-                        and isinstance(previous.get("exit_code"), int)
-                        and previous["exit_code"] > 0
-                        and previous.get("native_admission") == "absent"
-                    )
-                )
+        with session_lock(store.root, task["id"]) as record_path:
+            policy = worker_policy.read(store, task, policy_path)
+            if (
+                digest(load(Path(task["path"]) / CONFIG))
+                != policy["handoff"]["configuration_digest"]
             ):
                 raise ManagementError(
-                    "session_resume_required", "Use the observed native session ID to continue"
+                    "worker_unprepared", "Recipe changed after preparation; review it"
                 )
-        if resume is not None and saved_session is None:
-            observed = native_storage(policy)
-            if observed is None:
-                raise ManagementError(
-                    "native_session_unverified",
-                    "Cannot verify this taskenv's native session storage",
+            if policy["delegation"] is not None:
+                grant = store.get(KIND, policy["delegation"])
+                if not grant["active"] or grant["taskenv"] != task["id"]:
+                    raise ManagementError(
+                        "delegation_revoked", "Review and render the new delegation"
+                    )
+                Client(Path(policy["routes"]["LODEX_SERVICE_DELEGATION"])).request(
+                    "list", target=task["id"]
                 )
-            if resume not in {str(uuid.UUID(identity)) for identity in observed["native_ids"]}:
-                raise ManagementError(
-                    "native_session_scope", "Native session UUID is not recorded for this taskenv"
-                )
-        arguments = list(policy["agent_argv"])
-        if resume is not None:
-            arguments.extend(["resume", resume])
-        arguments.extend(["--", prompt])
-        record: dict[str, Any] = {
-            "id": uuid.uuid4().hex,
-            "taskenv": task["id"],
-            "policy": policy["id"],
-            "policy_file": str(policy_path),
-            "runtime": runtime,
-            "native_session": resume,
-            "task_digest": hashlib.sha256(prompt.encode()).hexdigest(),
-            "state": "running",
-            "started_at": now(),
-            "exit_code": None,
-        }
-        write_private(record_path, json.dumps(record))
-        child: subprocess.Popen[bytes] | None = None
-        watched = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
-        original = {sig: signal.getsignal(sig) for sig in watched}
-
-        def interrupted(signum: int, frame: object) -> None:
-            # Terminal Ctrl+C already reaches both processes in their foreground
-            # group. Keep the guard alive while the interactive agent handles it.
-            if signum != signal.SIGINT and child is not None and child.poll() is None:
-                child.send_signal(signum)
-
-        try:
-            for sig in watched:
-                signal.signal(sig, interrupted)
-            before = native_storage(policy) if resume is None else None
-            child = subprocess.Popen(
-                arguments, cwd=task["path"], env={**os.environ, **policy["launch_env"]}
-            )
-            record["exit_code"] = child.wait()
-            record["state"] = "exited"
-            if resume is None and record["exit_code"] > 0:
-                after = native_storage(policy)
-                record["native_admission"] = (
-                    "absent"
-                    if before is not None and before == after and not before["native_ids"]
-                    else "unknown"
-                )
-                record["native_storage_check"] = {
-                    "method": "codex-local-metadata-v1",
-                    "before": hashlib.sha256(
-                        json.dumps(before, sort_keys=True).encode()
-                    ).hexdigest()
-                    if before is not None
-                    else None,
-                    "after": hashlib.sha256(json.dumps(after, sort_keys=True).encode()).hexdigest()
-                    if after is not None
-                    else None,
-                }
-        except OSError:
-            if child is None:
-                record.update(state="launch_failed", exit_code=1)
-            raise
-        finally:
-            for sig, handler in original.items():
-                signal.signal(sig, handler)
-            record["observed_at"] = now()
+            # The task is supplied explicitly by A, not copied from a shared conversation.
+            prompt = task_file.read_text()
+            if not prompt.strip():
+                raise ManagementError("task_prompt", "Provide the task and handoff context")
+            saved_session = None
+            if record_path.exists():
+                previous = read_json(record_path)
+                if previous["state"] == "running":
+                    raise ManagementError(
+                        "worker_unknown",
+                        "Previous exit is unconfirmed; inspect its saved runtime before recovery",
+                    )
+                saved_session = previous.get("native_session")
+                if resume is not None and saved_session is not None:
+                    try:
+                        saved_session = str(uuid.UUID(saved_session))
+                    except (ValueError, TypeError, AttributeError) as exc:
+                        raise ManagementError(
+                            "native_session", "Cannot verify the saved native session UUID"
+                        ) from exc
+                    if resume != saved_session:
+                        raise ManagementError(
+                            "session_resume_mismatch",
+                            "Requested native session UUID does not match "
+                            "this taskenv's saved session",
+                        )
+                if resume is None and (
+                    previous.get("native_session") is not None
+                    or not (
+                        previous["state"] == "launch_failed"
+                        or (
+                            previous["state"] == "exited"
+                            and isinstance(previous.get("exit_code"), int)
+                            and previous["exit_code"] > 0
+                            and previous.get("native_admission") == "absent"
+                        )
+                    )
+                ):
+                    raise ManagementError(
+                        "session_resume_required", "Use the observed native session ID to continue"
+                    )
+            if resume is not None and saved_session is None:
+                observed = native_storage(policy)
+                if observed is None:
+                    raise ManagementError(
+                        "native_session_unverified",
+                        "Cannot verify this taskenv's native session storage",
+                    )
+                if resume not in {str(uuid.UUID(identity)) for identity in observed["native_ids"]}:
+                    raise ManagementError(
+                        "native_session_scope",
+                        "Native session UUID is not recorded for this taskenv",
+                    )
+            arguments = list(policy["agent_argv"])
+            if resume is not None:
+                arguments.extend(["resume", resume])
+            arguments.extend(["--", prompt])
+            record: dict[str, Any] = {
+                "id": uuid.uuid4().hex,
+                "taskenv": task["id"],
+                "policy": policy["id"],
+                "policy_file": str(policy_path),
+                "runtime": runtime,
+                "native_session": resume,
+                "task_digest": hashlib.sha256(prompt.encode()).hexdigest(),
+                "state": "running",
+                "started_at": now(),
+                "exit_code": None,
+            }
             write_private(record_path, json.dumps(record))
-        return int(record["exit_code"])
+            child: subprocess.Popen[bytes] | None = None
+            watched = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+            original = {sig: signal.getsignal(sig) for sig in watched}
+
+            def interrupted(signum: int, frame: object) -> None:
+                # Terminal Ctrl+C already reaches both processes in their foreground
+                # group. Keep the guard alive while the interactive agent handles it.
+                if signum != signal.SIGINT and child is not None and child.poll() is None:
+                    child.send_signal(signum)
+
+            try:
+                for sig in watched:
+                    signal.signal(sig, interrupted)
+                before = native_storage(policy) if resume is None else None
+                child = subprocess.Popen(
+                    arguments, cwd=task["path"], env={**os.environ, **policy["launch_env"]}
+                )
+                record["exit_code"] = child.wait()
+                record["state"] = "exited"
+                if resume is None and record["exit_code"] > 0:
+                    after = native_storage(policy)
+                    record["native_admission"] = (
+                        "absent"
+                        if before is not None and before == after and not before["native_ids"]
+                        else "unknown"
+                    )
+                    record["native_storage_check"] = {
+                        "method": "codex-local-metadata-v1",
+                        "before": hashlib.sha256(
+                            json.dumps(before, sort_keys=True).encode()
+                        ).hexdigest()
+                        if before is not None
+                        else None,
+                        "after": hashlib.sha256(
+                            json.dumps(after, sort_keys=True).encode()
+                        ).hexdigest()
+                        if after is not None
+                        else None,
+                    }
+            except OSError:
+                if child is None:
+                    record.update(state="launch_failed", exit_code=1)
+                raise
+            finally:
+                for sig, handler in original.items():
+                    signal.signal(sig, handler)
+                record["observed_at"] = now()
+                write_private(record_path, json.dumps(record))
+            return int(record["exit_code"])
+    finally:
+        store.close()
 
 
 def main() -> int:

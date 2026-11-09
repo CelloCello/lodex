@@ -47,21 +47,34 @@ def owned_bytes(record: dict[str, Any], filename: str, *, tail: bool = False) ->
                 part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor
             )
             stack.callback(os.close, descriptor)
-        descriptor = os.open(
-            filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptor
-        )
-        stack.callback(os.close, descriptor)
-        observed = os.fstat(descriptor)
-        if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
-            raise ManagementError(
-                "invalid_service_record", "Expected a private regular observation"
+        directory_fd = descriptor
+        for _ in range(3):
+            descriptor = os.open(
+                filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd
             )
-        limit = 65536 if tail else 16384
-        if tail:
-            os.lseek(descriptor, max(0, observed.st_size - limit), os.SEEK_SET)
-        elif observed.st_size > limit:
-            raise ManagementError("invalid_service_record", "Service observation is too large")
-        return os.read(descriptor, limit)
+            try:
+                observed = os.fstat(descriptor)
+                if stat.S_ISREG(observed.st_mode) and observed.st_nlink == 0:
+                    # Atomic replacement can unlink the opened snapshot before fstat.
+                    # Reopen only the filename, retaining the verified directory FDs.
+                    continue
+                if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
+                    raise ManagementError(
+                        "invalid_service_record", "Expected a private regular observation"
+                    )
+                limit = 65536 if tail else 16384
+                if tail:
+                    os.lseek(descriptor, max(0, observed.st_size - limit), os.SEEK_SET)
+                elif observed.st_size > limit:
+                    raise ManagementError(
+                        "invalid_service_record", "Service observation is too large"
+                    )
+                return os.read(descriptor, limit)
+            finally:
+                os.close(descriptor)
+        raise ManagementError(
+            "invalid_service_record", "Observation kept changing; retry inspection"
+        )
 
 
 def status(record: dict[str, Any]) -> dict[str, Any]:

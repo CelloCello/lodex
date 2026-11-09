@@ -179,9 +179,8 @@ class Controller:
         if self.closed or not self.registry.get(KIND, self.identity)["active"]:
             raise ManagementError("delegation_revoked", "Service delegation is inactive")
         current = self.registry.get("taskenv", self.task["id"])
-        for key in ("path", "common", "git_dir", "inode", "common_inode", "git_inode"):
-            if current.get(key) != self.task.get(key):
-                raise ManagementError("identity_changed", "Delegated taskenv identity changed")
+        if worktrees.binding(current) != worktrees.binding(self.task):
+            raise ManagementError("identity_changed", "Delegated taskenv binding changed")
         worktrees.require_present(current)
         descriptor = os.open(self.runtime["root"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:

@@ -126,7 +126,8 @@ def test_same_remote_different_clone_and_replacement(registry: Registry, repo: P
     assert worktrees.inspect(registry, original)["state"] == "missing"
     worktrees.git(clone.parent, "clone", str(clone), str(repo))
     assert worktrees.resolve(registry, str(repo))["id"] == original["id"]
-    assert worktrees.inspect(registry, original)["state"] == "identity_changed"
+    # A structurally identical checkout at the same location keeps the registration.
+    assert worktrees.inspect(registry, original)["state"] == "present"
 
 
 @pytest.mark.parametrize("tracked", ["tracked", "untracked", "ignored"])

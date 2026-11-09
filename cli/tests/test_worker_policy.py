@@ -15,9 +15,9 @@ from typer.testing import CliRunner
 
 from lodex_cli import worker_policy
 from lodex_cli.main import app
-from lodex_core.management import operations
+from lodex_core.management import operations, worktrees
 from lodex_core.management.common import ManagementError
-from lodex_core.management.delegation import Client
+from lodex_core.management.delegation import Client, revoke
 from lodex_core.management.project_config import CONFIG
 
 from .test_service_delegation import delegated as delegated
@@ -94,6 +94,25 @@ def test_draft_is_task_bound_secret_free_and_does_not_install_profiles(
     untrusted.write_text(json.dumps(policy))
     with pytest.raises(ManagementError):
         worker_policy.read(delegated["store"], delegated["tasks"][0], untrusted)
+
+
+def test_policy_ignores_legacy_inode_but_rebind_invalidates_policy_and_prepare(
+    delegated: Any, draft: Any
+) -> None:
+    store, task = delegated["store"], delegated["tasks"][0]
+    task.update(inode=[1, 2], git_inode=[3, 4], common_inode=[5, 6])
+    store.put("taskenv", task)
+    policy_path = Path(draft["policy"]["policy_file"])
+    assert worker_policy.read(store, task, policy_path)["id"] == draft["policy"]["id"]
+    revoke(store, delegated["infos"][0]["id"])
+    worktrees.attach(store, task["project"], Path(task["path"]), rebind=True, yes=True)
+    with pytest.raises(ManagementError) as stale:
+        worker_policy.read(store, task, policy_path)
+    assert stale.value.code == "identity_changed"
+    operations.run(store, task, "prepare")
+    with pytest.raises(ManagementError) as unprepared:
+        worker_policy.render(store, task, **draft["arguments"])
+    assert unprepared.value.code == "worker_unprepared"
 
 
 def test_recipe_or_legacy_settings_require_explicit_review(delegated: Any, draft: Any) -> None:

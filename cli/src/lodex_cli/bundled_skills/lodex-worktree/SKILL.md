@@ -19,12 +19,26 @@ registry access. Standalone worktree management needs no Herdr runtime.
 - Register: `lodex project add NAME /absolute/repo [--config /absolute/project.toml] --json`.
 - Create: `lodex worktree create NAME --ref REF --branch BRANCH --json`.
 - Attach existing main, external or detached checkout: `lodex worktree attach NAME /absolute/checkout --json`.
+- For an explicitly authorized rebind at a registered path, preview with `lodex worktree attach NAME /absolute/checkout --rebind --json`, then apply with `--rebind --yes`. It keeps the ID/ports/history, drops deletion ownership and requires prepare and a new worker policy. Stop agents/services and revoke delegations first; do not rebind implicitly.
 - Resolve: `lodex context --target /absolute/directory --json`.
 - Inspect records even when missing: `lodex worktree inspect --target ID --json`.
 - List: `lodex worktree list --json`.
 - Preview deletion: `lodex worktree remove --target ID --json`.
 - Execute authorized deletion with `--yes`; use `--force` only when the user explicitly chooses to discard Git-protected contents. Main and external checkouts cannot be removed.
 - Preview forgetting: `lodex worktree forget --target ID --json`; `--yes` removes registration, not resources.
+
+Environment validity uses canonical paths and Git associations, not saved device
+or inode numbers. Legacy inode fields are ignored. Missing, changed or temporarily
+unverifiable checkouts retain their records; inspect them by ID. Rebinding must
+remain in the registered project and path. An identical Git association at the
+same path continues the existing environment even if the directory was replaced.
+
+Rebind and managed worker launch share the worker-session lock. A previous worker
+with an unconfirmed exit still blocks rebind. For historical unknown operations
+without an execution lock, inspect the preview's `required_acknowledgements`, logs
+and resources and confirm processes have stopped before repeating
+`--acknowledge-operation ID` for those IDs with `--rebind --yes`. Acknowledgements
+retain the original outcomes and cannot override active workers/services/operations.
 
 Return the taskenv ID and absolute checkout path; do not claim the agent workspace
 was switched. Configuration fallback preserves existing project.toml and copies

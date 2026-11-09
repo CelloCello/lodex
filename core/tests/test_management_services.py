@@ -37,6 +37,22 @@ def test_conflict_exit_and_lock(registry: Registry, repo: Path) -> None:
         services.start(registry, task, "http")
 
 
+def test_changed_git_association_keeps_services_inspectable_and_stoppable(
+    registry: Registry, repo: Path
+) -> None:
+    service_config(repo)
+    task = register(registry, repo)
+    try:
+        assert services.start(registry, task, "worker")["state"] == "running"
+        (repo / ".git").rename(repo / "saved-git")
+        info = worktrees.inspect(registry, task)
+        assert info["state"] == "identity_changed" and info["services"][0]["state"] == "running"
+        assert services.stop(registry, task["id"], "worker")["state"] == "stopped"
+        assert registry.get("taskenv", task["id"]) == task
+    finally:
+        services.stop(registry, task["id"], "worker")
+
+
 @pytest.mark.parametrize("external", ["true", "false"])
 def test_external_config_is_rejected_without_rewriting(repo: Path, external: str) -> None:
     recipe = (

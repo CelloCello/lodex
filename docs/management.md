@@ -100,8 +100,16 @@ to edit it. Conflicts identify the existing project in the error message and
 ID or absolute directory selects an environment. No session, branch, remote or
 global current environment is inferred. Two clones of the same remote are distinct
 projects. One worktree has one current taskenv. Main/external/detached worktrees can
-be attached in place. Inspect retains records for missing/replaced paths; context
-rejects them. Git common-dir and directory identities are checked before operations.
+be attached in place. Environments register a directory location, not a permanent
+filesystem object. Before execution, Lodex checks the canonical worktree path,
+Git common directory, worktree Git directory and main-worktree status. Linked
+worktrees also require Git's worktree listing and a matching Git-directory
+backlink. Main checkouts support `--separate-git-dir`; Git's worktree list may name
+the metadata directory instead of the checkout in that layout. Remote URLs,
+branches, device numbers and inodes do not
+define this association. Old device/inode fields are ignored without rewriting
+existing registrations. A structurally identical checkout at the same location
+continues using the registration, even if its physical directories were replaced.
 An absolute path inside a nested repository or worktree selects that worktree only
 if it is registered; it never falls back to an enclosing worktree's taskenv.
 The current directory is read only when a target-taking command omits `--target`.
@@ -119,6 +127,61 @@ copy only a missing file from the explicit `--config` or registered source. The
 source may be tracked, untracked or ignored. This configuration fallback copies
 only TOML; Git checkout supplies tracked files normally. Read operations do not
 supply configuration. Required scripts may be absent from an old commit.
+
+### Unavailable directories and rebinding
+
+Inspection and listing retain environment, service, operation and resource records
+when directories become unavailable. `missing` means the registered path is absent;
+`identity_changed` means its Git association differs or it is no longer a Git
+worktree; `unavailable` means Git/filesystem access cannot currently be verified.
+Inspection includes an `identity` explanation and observed association when known.
+Execution rejects these states. Saved service handles still support manager-side
+inspection, logs and stop independently of the checkout; they do not authorize
+running a replacement checkout's cleanup recipe against old resources.
+
+Restore a usable worktree at the registered path, then explicitly preview and
+confirm its new association with the same project's Git common directory:
+
+```sh
+lodex worktree attach app /absolute/registered/path --rebind --json
+lodex worktree attach app /absolute/registered/path --rebind --yes --json
+```
+
+Preview does not copy configuration or update the registration. Confirmation keeps
+the taskenv ID, ports and history, drops worktree deletion ownership, increments
+the binding revision and requires a successful `prepare` before further commands
+or service starts. Failed prepare leaves that requirement in place. Rebind and
+worker launch share the worker-session lock; launch validates the policy binding
+inside that lock. Active workers, unconfirmed worker exits, service delegations,
+nonterminal/unknown services, executing operations and pending supervisor
+acknowledgements must be resolved first. Existing resource records remain historical
+observations, not proof that a resource is still present or owned by the new checkout.
+Old preparation handoffs and worker policies cannot authorize the new binding;
+prepare and generate a new worker policy before dispatching a worker. Legacy worker
+policies using device/inode identities must also be regenerated once.
+
+An operation with no active execution lock can retain an `unknown` outcome (for
+example, the command exited but wrote an invalid result). Rebind preview lists
+these under `unresolved_operations` and `required_acknowledgements`. Inspect each
+operation and its logs, verify its processes have stopped and handle any remaining
+resources, then explicitly acknowledge each ID when confirming:
+
+```sh
+lodex worktree attach app /absolute/registered/path --rebind --yes \
+  --acknowledge-operation OPERATION_ID --json
+```
+
+Repeat `--acknowledge-operation` for multiple IDs. This never overrides an active
+operation lock, service or worker. Confirmation records acknowledgement time and
+binding revision in the environment's `rebind_acknowledgements`; operation history
+and resource outcomes stay unchanged. Previously acknowledged outcomes do not
+block subsequent rebinds. The Console action API accepts the same IDs in
+`acknowledge_operations`.
+
+Rebinding neither creates a new environment nor transfers it between projects or
+directory locations. A checkout belonging to another Git common directory must be
+registered under its appropriate project. Ordinary attach remains idempotent for
+an unchanged association and never silently accepts a changed one.
 
 ### Updating integrations
 
@@ -160,7 +223,7 @@ names, without a `secret:` prefix, and need no project, worktree or `--target`.
 | `project delete PROJECT [--yes]` | No | Preview or delete an empty project registration; retain all files and other records. |
 | `project list` | No | List registered projects. |
 | `worktree create PROJECT --ref REF --branch BRANCH [--config PATH]` | No | Create a new branch and owned worktree from a Git ref, then register it; does not run prepare. |
-| `worktree attach PROJECT PATH [--config PATH]` | No | Register an existing worktree belonging to the project's local repository, including its main worktree. |
+| `worktree attach PROJECT PATH [--config PATH] [--rebind [--yes]] [--acknowledge-operation ID]` | No | Register an existing worktree, or explicitly preview/confirm rebinding at its registered path; confirmed rebind keeps the ID and history, drops deletion ownership and requires prepare. Repeat the acknowledgement flag for stopped operations with unknown outcomes. |
 | `worktree list` | No | List registered environments and their current inspection state. |
 | `worktree inspect` | Yes | Inspect configuration, worktree identity and known resource records, even when the worktree is missing. |
 | `worktree worker-config --prepare-operation ID --profile NAME --uv-cache PATH [--delegation ID] [--allow-host HOST] [--deny-socket PATH] [--deny-path PATH] [--trust-checkout]` | Yes | Draft protected per-launch Codex settings for a successful prepare; no agent launch or global profile installation. Checkout trust is explicit and invocation-only. |

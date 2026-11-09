@@ -51,6 +51,8 @@ class Action(BaseModel):
     output: str = ".env"
     yes: bool = False
     force: bool = False
+    rebind: bool = False
+    acknowledge_operations: list[str] = Field(default_factory=list)
 
     def require(self, key: str) -> str:
         value = getattr(self, key)
@@ -94,7 +96,13 @@ def execute(store: Registry, request: Action) -> Any:
         )
     if action == "worktree.attach":
         return worktrees.attach(
-            store, request.require("project"), request.absolute_path("path"), source
+            store,
+            request.require("project"),
+            request.absolute_path("path"),
+            source,
+            rebind=request.rebind,
+            yes=request.yes,
+            acknowledge_operations=request.acknowledge_operations,
         )
     if action.startswith("secret."):
         name = request.require("name")

@@ -33,7 +33,7 @@ from lodex_core.management.processes import (
 )
 from lodex_core.management.project_config import CONFIG, check_command, digest, load, supply
 from lodex_core.management.store import Registry
-from lodex_core.management.worktrees import git, require_present
+from lodex_core.management.worktrees import git, require_prepared, require_present
 
 
 def inspect_operation(registry: Registry, record: dict[str, Any]) -> dict[str, Any]:
@@ -120,6 +120,8 @@ def run(
     with registry.lock(task["id"]), ExitStack() as held:
         registry.reload_task(task)
         root = require_present(task)
+        if command != "prepare":
+            require_prepared(task)
         if command == "prepare":
             project = registry.get("project", task["project"])
             provenance = supply(root, source or Path(project["source"]))
@@ -254,11 +256,14 @@ def run(
                 result_path.unlink(missing_ok=True)
                 record["observed_at"] = now()
                 if command == "prepare" and record["state"] == "succeeded":
+                    task.pop("prepare_required", None)
+                    registry.put("taskenv", task)
                     record["handoff"] = {
                         "version": 1,
                         "taskenv": task["id"],
                         "path": str(root),
                         "project": task["project"],
+                        "binding_revision": task.get("binding_revision", 0),
                         "base_commit": task.get("base_commit"),
                         "checkout_commit": checkout_commit,
                         "configuration": str(root / CONFIG),

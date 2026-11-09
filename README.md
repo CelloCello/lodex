@@ -130,6 +130,13 @@ Projects can have an editable display name (`project add … --display-name TEXT
 `project rename ID NAME`). Commands and existing environments continue using the
 fixed project ID; older registrations display that ID until named.
 
+Environment checks use canonical paths and Git worktree associations, so a reboot
+changing device numbers does not invalidate registrations. Missing or mismatched
+directories retain their records. Use `worktree attach PROJECT PATH --rebind` to
+preview an explicit new association at a registered path, then `--rebind --yes`
+to accept it; this preserves the ID and history, drops deletion ownership and
+requires prepare again. See [rebinding](docs/management.md#unavailable-directories-and-rebinding).
+
 `project add` validates and keeps an existing `.lodex/project.toml`. If it is
 missing, it creates a minimal skeleton, or copies the recipe passed with
 `--config PATH`. For a new skeleton, edit the file to define the repository's

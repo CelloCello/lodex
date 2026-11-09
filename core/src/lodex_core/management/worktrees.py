@@ -9,12 +9,23 @@ import socket
 import subprocess
 import unicodedata
 import uuid
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
-from lodex_core.management.common import ManagementError, name, now
+from lodex_core.management.common import ManagementError, name, now, read_json
 from lodex_core.management.project_config import CONFIG, load, supply
 from lodex_core.management.store import Registry
+from lodex_core.management.worker_sessions import session_lock
+
+IDENTITY_FIELDS = ("path", "common", "git_dir", "main")
+
+
+def binding(task: dict[str, Any]) -> dict[str, Any]:
+    """Stable directory association, including explicit rebinds, never device/inode IDs."""
+    return {key: task[key] for key in IDENTITY_FIELDS} | {
+        "binding_revision": task.get("binding_revision", 0)
+    }
 
 
 def git(path: Path, *args: str) -> str:
@@ -34,16 +45,25 @@ def identity(path: Path) -> dict[str, Any]:
     root = Path(git(path, "rev-parse", "--show-toplevel")).resolve()
     common = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve()
     git_dir = Path(git(root, "rev-parse", "--absolute-git-dir")).resolve()
-    stat = root.stat()
-    common_stat = common.stat()
-    git_stat = git_dir.stat()
+    if common != git_dir:
+        paths = {
+            str(Path(field.removeprefix("worktree ")).resolve())
+            for field in git(common, "worktree", "list", "--porcelain", "-z").split("\0")
+            if field.startswith("worktree ")
+        }
+        if str(root) not in paths:
+            raise ManagementError(
+                "identity_changed", "Directory is not listed by its Git repository"
+            )
+        backlink = Path((git_dir / "gitdir").read_text().rstrip("\n"))
+        if not backlink.is_absolute():
+            backlink = git_dir / backlink
+        if backlink.resolve() != (root / ".git").resolve():
+            raise ManagementError("identity_changed", "Git directory points to another worktree")
     return {
         "path": str(root),
         "common": str(common),
         "git_dir": str(git_dir),
-        "inode": [stat.st_dev, stat.st_ino],
-        "common_inode": [common_stat.st_dev, common_stat.st_ino],
-        "git_inode": [git_stat.st_dev, git_stat.st_ino],
         "main": common == git_dir,
     }
 
@@ -115,10 +135,6 @@ def project_add(
         for project in registry.all("project"):
             if project["id"] == label or project["common"] == info["common"]:
                 if project["id"] == label and project["common"] == info["common"]:
-                    if project["common_inode"] != info["common_inode"]:
-                        raise ManagementError(
-                            "identity_changed", "Registered repository was replaced"
-                        )
                     existing = project
                     break
                 raise ManagementError(
@@ -136,7 +152,6 @@ def project_add(
             project = {
                 "id": label,
                 "common": info["common"],
-                "common_inode": info["common_inode"],
                 "source_checkout": info["path"],
                 "source": str(root / CONFIG),
                 "created_at": now(),
@@ -198,9 +213,24 @@ def attach(
     *,
     owned: bool = False,
     task_id: str | None = None,
+    rebind: bool = False,
+    yes: bool = False,
+    acknowledge_operations: list[str] | None = None,
 ) -> dict[str, Any]:
+    if (yes or acknowledge_operations) and not rebind:
+        raise ManagementError("invalid_input", "Confirmation options require --rebind for attach")
     with registry.lock("registry"):
-        return _attach_locked(registry, project_id, path, source, owned=owned, task_id=task_id)
+        return _attach_locked(
+            registry,
+            project_id,
+            path,
+            source,
+            owned=owned,
+            task_id=task_id,
+            rebind=rebind,
+            yes=yes,
+            acknowledge_operations=acknowledge_operations,
+        )
 
 
 def _attach_locked(
@@ -211,28 +241,128 @@ def _attach_locked(
     *,
     owned: bool,
     task_id: str | None,
+    rebind: bool = False,
+    yes: bool = False,
+    acknowledge_operations: list[str] | None = None,
 ) -> dict[str, Any]:
     """Register a checkout while the caller holds the registry lock."""
     project = registry.get("project", project_id)
     info = identity(path)
-    if info["common"] != project["common"] or info["common_inode"] != project["common_inode"]:
+    if info["common"] != project["common"]:
         raise ManagementError("wrong_repository", "Worktree belongs to a different repository")
     for task in registry.all("taskenv"):
         if task["path"] == info["path"]:
-            with registry.lock(task["id"]):
+            with registry.lock(task["id"]), ExitStack() as held:
                 registry.reload_task(task)
-                require_present(task)
                 if task["project"] != project_id:
                     raise ManagementError(
                         "already_registered", "Worktree is registered to another project"
                     )
+                if rebind:
+                    from lodex_core.management.operations import inspect_operation
+                    from lodex_core.management.services import list_services
+
+                    worker_record = held.enter_context(session_lock(registry.root, task["id"]))
+                    if worker_record.exists() and read_json(worker_record).get("state") not in (
+                        "exited",
+                        "launch_failed",
+                    ):
+                        raise ManagementError(
+                            "worker_unknown", "Confirm the previous worker exited before rebind"
+                        )
+                    operations = [
+                        op for op in registry.all("operation") if op["taskenv"] == task["id"]
+                    ]
+
+                    if (
+                        any(
+                            grant["taskenv"] == task["id"] and grant["active"]
+                            for grant in registry.all("service-delegation")
+                        )
+                        or any(registry.busy(f"op-{op['id']}") for op in operations)
+                        or any(
+                            service["state"] not in ("stopped", "exited", "failed", "external")
+                            or service.get("pending_acks")
+                            for service in list_services(registry, task["id"])
+                        )
+                    ):
+                        raise ManagementError(
+                            "busy",
+                            "Stop services, revoke delegations and resolve operations "
+                            "before rebind",
+                        )
+                    requested = set(acknowledge_operations or [])
+                    if requested - {op["id"] for op in operations}:
+                        raise ManagementError(
+                            "invalid_input",
+                            "Acknowledge only operation IDs belonging to this environment",
+                        )
+                    receipts = dict(task.get("rebind_acknowledgements", {}))
+                    unresolved = [
+                        inspect_operation(registry, op)
+                        for op in operations
+                        if op["state"] not in ("succeeded", "failed", "interrupted")
+                        and op["id"] not in receipts
+                    ]
+                    pending = [op["id"] for op in unresolved if op["id"] not in requested]
+                    revision = task.get("binding_revision", 0) + 1
+                    for op in unresolved:
+                        if op["id"] in requested:
+                            receipts[op["id"]] = {
+                                "observed_at": now(),
+                                "binding_revision": revision,
+                            }
+                    updated = {
+                        **task,
+                        **info,
+                        "owned": False,
+                        "prepare_required": True,
+                        "binding_revision": revision,
+                        "rebind_acknowledgements": receipts,
+                    }
+                    preview = {
+                        "id": task["id"],
+                        "project": project_id,
+                        "path": info["path"],
+                        "before": binding(task),
+                        "after": binding(updated),
+                        "rebound": False,
+                        "previous_owned": task["owned"],
+                        "owned": False,
+                        "prepare_required": True,
+                        "unresolved_operations": [
+                            {key: op.get(key) for key in ("id", "state", "exit_code", "error")}
+                            for op in unresolved
+                        ],
+                        "required_acknowledgements": pending,
+                        "warning": (
+                            "Keeps ID, ports and history; drops deletion ownership and "
+                            "requires prepare. Old worker policies must be regenerated."
+                        ),
+                    }
+                    if not yes:
+                        return preview
+                    if pending:
+                        raise ManagementError(
+                            "unresolved_operations",
+                            "Inspect unknown operations, confirm their processes stopped, then use "
+                            "--acknowledge-operation ID for each before rebind",
+                            details=preview,
+                        )
+                    task = updated
+                    for key in ("inode", "common_inode", "git_inode", "removed_at", "setup_error"):
+                        task.pop(key, None)
+                else:
+                    require_present(task)
                 provenance = supply(Path(info["path"]), source or Path(project["source"]))
                 if provenance["method"] == "copied":
                     task["config_source"] = provenance
                 allocate(registry, task, load(Path(info["path"]) / CONFIG))
                 task.pop("setup_error", None)
                 registry.put("taskenv", task)
-                return task
+                return {**task, "rebound": True} if rebind else task
+    if rebind:
+        raise ManagementError("not_found", "Rebind requires a registered environment at this path")
     provenance = supply(Path(info["path"]), source or Path(project["source"]))
     task = {
         **info,
@@ -272,8 +402,11 @@ def create(
     with registry.lock(project_lock), registry.lock("registry"):
         project = registry.get("project", project_id)
         common = Path(project["common"])
-        if [common.stat().st_dev, common.stat().st_ino] != project["common_inode"]:
-            raise ManagementError("identity_changed", "Registered repository has been replaced")
+        actual_common = Path(
+            git(common, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        ).resolve()
+        if str(actual_common) != project["common"]:
+            raise ManagementError("identity_changed", "Registered Git common directory changed")
         commit = git(common, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
         task_id, path = creation_location(registry, project_id, branch)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -307,23 +440,69 @@ def create(
             ) from exc
 
 
-def state(task: dict[str, Any]) -> str:
-    if not Path(task["path"]).exists():
-        return "missing"
+def observe(task: dict[str, Any]) -> dict[str, Any]:
+    """Report recoverable directory problems without discarding saved records."""
+    root = Path(task["path"])
     try:
-        actual = identity(Path(task["path"]))
-    except (ManagementError, OSError):
-        return "identity_changed"
-    return "present" if all(actual[k] == task[k] for k in actual) else "identity_changed"
+        root.stat()
+    except (FileNotFoundError, NotADirectoryError):
+        return {"state": "missing", "reason": "Registered directory does not exist"}
+    except OSError as exc:
+        return {"state": "unavailable", "reason": str(exc)}
+    try:
+        actual = identity(root)
+    except (FileNotFoundError, NotADirectoryError):
+        return {"state": "identity_changed", "reason": "Git association metadata is missing"}
+    except OSError as exc:
+        return {"state": "unavailable", "reason": str(exc)}
+    except ManagementError as exc:
+        try:
+            (root / ".git").stat()
+        except (FileNotFoundError, NotADirectoryError):
+            return {"state": "identity_changed", "reason": "Directory is not a Git worktree"}
+        except OSError as error:
+            return {"state": "unavailable", "reason": str(error)}
+        return {
+            "state": "identity_changed" if exc.code == "identity_changed" else "unavailable",
+            "reason": str(exc),
+        }
+    if any(actual[key] != task[key] for key in IDENTITY_FIELDS):
+        return {
+            "state": "identity_changed",
+            "reason": "Git worktree association changed",
+            "actual": actual,
+        }
+    return {"state": "present"}
+
+
+def state(task: dict[str, Any]) -> str:
+    return str(observe(task)["state"])
 
 
 def require_present(task: dict[str, Any]) -> Path:
-    status = state(task)
-    if status != "present":
+    observation = observe(task)
+    if observation["state"] != "present":
         raise ManagementError(
-            status, f"Environment {task['id']}: worktree is {status}: {task['path']}"
+            observation["state"],
+            f"Environment {task['id']}: {observation['reason']}: {task['path']}",
+            details={
+                **observation,
+                "rebind": [
+                    "lodex",
+                    "worktree",
+                    "attach",
+                    task["project"],
+                    task["path"],
+                    "--rebind",
+                ],
+            },
         )
     return Path(task["path"])
+
+
+def require_prepared(task: dict[str, Any]) -> None:
+    if task.get("prepare_required"):
+        raise ManagementError("prepare_required", "Environment was rebound; run prepare first")
 
 
 def resolve(registry: Registry, selector: str) -> dict[str, Any]:
@@ -356,7 +535,8 @@ def inspect(registry: Registry, task: dict[str, Any]) -> dict[str, Any]:
     from lodex_core.management.operations import inspect_operation
     from lodex_core.management.services import list_services
 
-    status = state(task)
+    observation = observe(task)
+    status = observation["state"]
     git_state: dict[str, Any] = {"branch": None, "head": None}
     if status == "present":
         try:
@@ -401,6 +581,7 @@ def inspect(registry: Registry, task: dict[str, Any]) -> dict[str, Any]:
     return {
         **task,
         **git_state,
+        "identity": observation,
         "state": status,
         "config_status": config_status,
         "services": list_services(registry, task["id"]),

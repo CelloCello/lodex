@@ -192,6 +192,9 @@ def prepare_start(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Reserve a launch under the caller's task lock; never execute repo code."""
     registry.reload_task(task)
+    from lodex_core.management.worktrees import require_prepared
+
+    require_prepared(task)
     key = f"{task['id']}-{service}"
     previous = next((s for s in registry.all("service") if s["id"] == key), None)
     if previous and previous["state"] == "external":
