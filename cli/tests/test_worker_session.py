@@ -15,12 +15,14 @@ from typing import Any
 from unittest.mock import Mock
 
 import pytest
+from typer.testing import CliRunner
 
 from lodex_cli import worker_policy, worker_session
-from lodex_core.management import worktrees
+from lodex_cli.main import app
+from lodex_core.management import operations, worktrees
 from lodex_core.management.common import ManagementError, write_private
-from lodex_core.management.delegation import revoke
-from lodex_core.management.worker_sessions import session_lock
+from lodex_core.management.delegation import Client, revoke
+from lodex_core.management.worker_sessions import reconcile, session_lock
 
 from .test_service_delegation import delegated as delegated
 from .test_worker_policy import draft as draft
@@ -101,6 +103,140 @@ def finish(process: subprocess.Popen[str]) -> None:
             stream.close()
 
 
+@pytest.mark.parametrize("resuming", [False, True])
+def test_guard_crash_keeps_live_child_locked_then_reconciles_same_session_without_touching_peer(
+    delegated: Any, draft: Any, tmp_path: Path, resuming: bool
+) -> None:
+    store = delegated["store"]
+    task, peer = delegated["tasks"]
+    policy = draft["policy"]
+    prepared = operations.run(store, peer, "prepare")
+    peer_policy = worker_policy.render(
+        store,
+        peer,
+        **{
+            **draft["arguments"],
+            "prepare_operation": prepared["id"],
+            "delegation": delegated["infos"][1]["id"],
+        },
+    )
+    fixture_program(policy, tmp_path)
+    fixture_program(peer_policy, tmp_path)
+    native = record_native_session(policy)
+    peer_native = record_native_session(peer_policy)
+    prompt = tmp_path / "task.txt"
+    prompt.write_text("Continue this isolated task")
+    original = launch(policy, prompt, "core", native if resuming else None)
+    other = launch(peer_policy, prompt, "core", peer_native)
+    resumed = None
+    try:
+        assert line(original) == line(other) == "fixture-ready"
+        path = store.root / "worker-sessions" / f"{task['id']}.json"
+        peer_path = store.root / "worker-sessions" / f"{peer['id']}.json"
+        record = json.loads(path.read_text())
+        peer_before = peer_path.read_bytes()
+        original.kill()  # Kill only this fixture's guard; its child remains alive.
+        original.wait(timeout=5)
+        assert json.loads(path.read_text())["state"] == "running"
+        with pytest.raises(ManagementError) as alive:
+            reconcile(
+                store, task, yes=True, record_id=record["id"], evidence="Not sufficient while live"
+            )
+        assert alive.value.code == "worker_active"
+        assert store.all("worker-reconciliation") == []
+        # Explicitly end the orphan fixture, then drain its output to EOF.
+        assert original.stdin is not None
+        original.stdin.write("exit\n")
+        original.stdin.flush()
+        original.communicate(timeout=10)
+        runner = CliRunner()
+        preview = runner.invoke(
+            app, ["worktree", "reconcile-worker", "--target", task["id"], "--json"]
+        )
+        assert preview.exit_code == 0, preview.stdout
+        assert json.loads(preview.stdout)["result"]["worker"] == record
+        applied = runner.invoke(
+            app,
+            [
+                "worktree",
+                "reconcile-worker",
+                "--target",
+                task["id"],
+                "--record-id",
+                record["id"],
+                "--evidence",
+                "Fixture agent exited; output pipe EOF observed",
+                "--yes",
+                "--json",
+            ],
+        )
+        assert applied.exit_code == 0, applied.stdout
+        receipt = json.loads(applied.stdout)["result"]["receipt"]
+        wrong = launch(policy, prompt, "core", str(uuid.uuid4()))
+        _, error = wrong.communicate(timeout=10)
+        assert wrong.returncode == 1
+        assert ("does not match" if resuming else "not recorded") in error
+        fresh = launch(policy, prompt, "core")
+        _, error = fresh.communicate(timeout=10)
+        assert fresh.returncode == 1 and "native session ID" in error
+        resumed = launch(policy, prompt, "core", native)
+        assert line(resumed) == "fixture-ready"
+        assert json.loads(path.read_text())["native_session"] == native
+        assert other.poll() is None and peer_path.read_bytes() == peer_before
+        assert other.stdin is not None
+        other.stdin.write("peer-still-working\n")
+        other.stdin.flush()
+        assert line(other) == "fixture-reply:peer-still-working"
+        assert store.get("worker-reconciliation", receipt["id"])["previous"] == record
+    finally:
+        if original.stdin is not None and not original.stdin.closed:
+            # Also release an orphan child on assertion failure.
+            try:
+                original.communicate("exit\n", timeout=10)
+            except (BrokenPipeError, ValueError):
+                pass
+        finish(original)
+        finish(other)
+        if resumed is not None:
+            finish(resumed)
+
+
+def test_managed_service_does_not_retain_writer_lock_after_agent_exit(
+    delegated: Any, draft: Any, tmp_path: Path
+) -> None:
+    policy = draft["policy"]
+    task = delegated["tasks"][0]
+    fixture_program(policy, tmp_path)
+    program = tmp_path / "interactive.py"
+    original = program.read_text()
+    credential = policy["routes"]["LODEX_SERVICE_DELEGATION"]
+    program.write_text(
+        "from pathlib import Path\nfrom lodex_core.management.delegation import Client\n"
+        f"Client(Path({credential!r})).perform('start','job',None)\n" + original
+    )
+    native = record_native_session(policy)
+    prompt = tmp_path / "task.txt"
+    prompt.write_text("Manage this task's service")
+    first = launch(policy, prompt, "core", native)
+    try:
+        assert line(first) == "fixture-ready"
+    finally:
+        finish(first)
+    client = Client(Path(credential))
+    service = client.perform("inspect", "job", None)
+    assert service["state"] == "running"
+    with session_lock(delegated["store"].root, task["id"]):
+        pass
+    program.write_text(original)
+    continued = launch(policy, prompt, "core", native)
+    try:
+        assert line(continued) == "fixture-ready"
+        observed = client.perform("inspect", "job", None)
+        assert observed["state"] == "running" and observed["pid"] == service["pid"]
+    finally:
+        finish(continued)
+
+
 def test_worker_validates_binding_while_holding_the_shared_session_lock(
     delegated: Any, draft: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -137,9 +273,11 @@ def test_rebind_winning_launch_race_invalidates_policy_before_worker_spawn(
     write_private(Path(policy["policy_file"]), json.dumps(policy))
 
     @contextmanager
-    def rebind_first(root: Path, task_id: str) -> Iterator[Path]:
+    def rebind_first(
+        root: Path, task_id: str, *, child_fds: list[int] | None = None
+    ) -> Iterator[Path]:
         worktrees.attach(store, task["project"], Path(task["path"]), rebind=True, yes=True)
-        with session_lock(root, task_id) as record:
+        with session_lock(root, task_id, child_fds=child_fds) as record:
             yield record
 
     monkeypatch.setattr(worker_session, "session_lock", rebind_first)

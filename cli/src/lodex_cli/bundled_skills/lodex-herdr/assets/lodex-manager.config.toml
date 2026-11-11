@@ -1,5 +1,5 @@
 # Template: render and review through references/codex.md before installing.
-# Replace both /REPLACE_WITH_* paths with observed absolute paths.
+# Replace all /REPLACE_WITH_* paths with observed absolute paths.
 approval_policy = "on-request"
 # Optional: route eligible manager approval requests to automatic review.
 # Enable only with user confirmation; review may deny requests or need user input.
@@ -15,6 +15,7 @@ extends = ":workspace"
 
 [permissions.lodex-manager.filesystem]
 "/REPLACE_WITH_LODEX_HOME" = "write"
+"/REPLACE_WITH_LODEX_WORKSPACE_ROOT" = "write"
 # Shared uv package cache; confirm the effective path with `uv cache dir`.
 "~/.cache/uv" = "write"
 
@@ -23,6 +24,9 @@ extends = ":workspace"
 
 [permissions.lodex-manager.network]
 enabled = true
+# The manager checks service-port availability with short-lived loopback binds.
+# This capability is not restricted to Lodex-allocated ports; review at setup.
+allow_local_binding = true
 
 # No public destinations are allowed by this template's active network proxy.
 # Review inherited domain rules; add only destinations needed by the project.

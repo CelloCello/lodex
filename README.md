@@ -336,6 +336,7 @@ lodex skill install lodex-herdr
 | Workflow | Configuration | Default data location |
 | --- | --- | --- |
 | Environment management | Each checkout's `.lodex/project.toml`; allocated ports and central secrets in the registry | `~/.lodex/management.db`, logs and service handles under `~/.lodex` (`LODEX_HOME`) |
+| Task workspaces | `LODEX_HOME/management.toml`: `workspace_root`, overridden by `LODEX_WORKSPACE_ROOT` | `~/.lodex-workspaces`; existing task paths remain unchanged |
 | Session history | `~/.lodex/history/config.toml` (`LODEX_CONFIG`) | `~/.lodex/history/lodex.db` (`LODEX_DATA_DIR` / `LODEX_DB_PATH`) |
 
 `LODEX_HOME` changes the default root for both workflows (default `~/.lodex`).

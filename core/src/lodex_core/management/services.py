@@ -181,6 +181,25 @@ def list_services(registry: Registry, task_id: str) -> list[dict[str, Any]]:
     ]
 
 
+def services_retired(registry: Registry, task_id: str) -> bool:
+    """Read-only check under the task lock. A terminal observation can precede its receipt."""
+    acknowledged = {
+        (receipt["service_id"], receipt["id"])
+        for receipt in registry.all(TERMINAL_KIND)
+        if receipt["taskenv"] == task_id and receipt.get("terminal_acknowledged") is True
+    }
+    for service in list_services(registry, task_id):
+        state = service["state"]
+        if state != "external" and state not in service_runtime.TERMINAL_STATES:
+            return False
+        if service.get("pending_acks"):
+            return False
+        grant = service.get("delegated")
+        if grant is not None and (service["id"], grant["launch"]) not in acknowledged:
+            return False
+    return True
+
+
 def prepare_start(
     registry: Registry,
     task: dict[str, Any],
@@ -261,6 +280,11 @@ def prepare_start(
         "stop_timeout": record["stop_timeout"],
     }
     if runtime:
+        # The controller's global temp is outside the worker's writable/socket
+        # scope. New delegated launches default to a short path inside the
+        # approved grant; explicit project TMPDIR settings remain authoritative.
+        if "TMPDIR" not in values:
+            payload["env"]["TMPDIR"] = str(Path(runtime["root"]) / "t")
         payload["control_socket"] = str(Path(runtime["root"]) / f"{launch_id[:12]}.sock")
         write_private(
             Path(record["delegated"]["control_file"]),
@@ -272,6 +296,11 @@ def prepare_start(
 def launch(record: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     """Execute in the calling process's sandbox, without opening the registry."""
     private_dir(Path(record["directory"]))
+    if "delegated" in record:
+        temporary = Path(record["delegated"]["root"]) / "t"
+        if payload["env"].get("TMPDIR") == str(temporary):
+            # This runs in the worker sandbox, never with controller authority.
+            private_dir(temporary)
     bootstrap = (
         "import sys; sys.path.insert(0,sys.argv[1]); "
         "from lodex_core.management.runner import main; main()"

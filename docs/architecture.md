@@ -73,6 +73,9 @@ User data defaults to `LODEX_HOME` (`~/.lodex`) outside the repository. Manageme
 uses `management.db` and its resource directories; history defaults to
 `history/config.toml` and `history/lodex.db`, with explicit history path overrides
 available. The two workflows keep separate databases and configuration contracts.
+New task workspaces and worker runtimes use a separate configurable root
+(`~/.lodex-workspaces` by default). Each task saves its root; configuration changes
+do not migrate existing environments. See [workspace configuration](management.md).
 Import/package changes do not change database schemas or taskenv IDs.
 
 ## Development and tests

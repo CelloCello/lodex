@@ -107,7 +107,7 @@ def test_create_worktree_with_long_project_name(
     worktrees.project_add(registry, label, repo, None)
     task = worktrees.create(registry, label, "HEAD", "feature/long-project")
     assert task["project"] == label
-    assert Path(task["path"]).parent == registry.root / "projects" / label
+    assert Path(task["path"]).parent == Path(task["workspace_root"]) / label
     assert worktrees.inspect(registry, task)["state"] == "present"
     assert worktrees.attach(registry, label, Path(task["path"]))["id"] == task["id"]
 

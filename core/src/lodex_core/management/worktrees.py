@@ -13,10 +13,11 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
-from lodex_core.management.common import ManagementError, name, now, read_json
+from lodex_core.management.common import ManagementError, name, now
 from lodex_core.management.project_config import CONFIG, load, supply
 from lodex_core.management.store import Registry
-from lodex_core.management.worker_sessions import session_lock
+from lodex_core.management.worker_sessions import inactive_session
+from lodex_core.management.workspace import configured_root, registration_locks, validate_checkout
 
 IDENTITY_FIELDS = ("path", "common", "git_dir", "main")
 
@@ -220,23 +221,25 @@ def attach(
     if (yes or acknowledge_operations) and not rebind:
         raise ManagementError("invalid_input", "Confirmation options require --rebind for attach")
     with registry.lock("registry"):
-        return _attach_locked(
-            registry,
-            project_id,
-            path,
-            source,
-            owned=owned,
-            task_id=task_id,
-            rebind=rebind,
-            yes=yes,
-            acknowledge_operations=acknowledge_operations,
-        )
+        info = identity(path)
+        with registration_locks(registry, Path(info["path"])):
+            return _attach_locked(
+                registry,
+                project_id,
+                info,
+                source,
+                owned=owned,
+                task_id=task_id,
+                rebind=rebind,
+                yes=yes,
+                acknowledge_operations=acknowledge_operations,
+            )
 
 
 def _attach_locked(
     registry: Registry,
     project_id: str,
-    path: Path,
+    info: dict[str, Any],
     source: Path | None,
     *,
     owned: bool,
@@ -244,10 +247,10 @@ def _attach_locked(
     rebind: bool = False,
     yes: bool = False,
     acknowledge_operations: list[str] | None = None,
+    workspace_root: Path | None = None,
 ) -> dict[str, Any]:
     """Register a checkout while the caller holds the registry lock."""
     project = registry.get("project", project_id)
-    info = identity(path)
     if info["common"] != project["common"]:
         raise ManagementError("wrong_repository", "Worktree belongs to a different repository")
     for task in registry.all("taskenv"):
@@ -260,16 +263,9 @@ def _attach_locked(
                     )
                 if rebind:
                     from lodex_core.management.operations import inspect_operation
-                    from lodex_core.management.services import list_services
+                    from lodex_core.management.services import services_retired
 
-                    worker_record = held.enter_context(session_lock(registry.root, task["id"]))
-                    if worker_record.exists() and read_json(worker_record).get("state") not in (
-                        "exited",
-                        "launch_failed",
-                    ):
-                        raise ManagementError(
-                            "worker_unknown", "Confirm the previous worker exited before rebind"
-                        )
+                    held.enter_context(inactive_session(registry.root, task["id"]))
                     operations = [
                         op for op in registry.all("operation") if op["taskenv"] == task["id"]
                     ]
@@ -280,11 +276,7 @@ def _attach_locked(
                             for grant in registry.all("service-delegation")
                         )
                         or any(registry.busy(f"op-{op['id']}") for op in operations)
-                        or any(
-                            service["state"] not in ("stopped", "exited", "failed", "external")
-                            or service.get("pending_acks")
-                            for service in list_services(registry, task["id"])
-                        )
+                        or not services_retired(registry, task["id"])
                     ):
                         raise ManagementError(
                             "busy",
@@ -320,6 +312,7 @@ def _attach_locked(
                         "binding_revision": revision,
                         "rebind_acknowledgements": receipts,
                     }
+                    validate_checkout(registry, updated)
                     preview = {
                         "id": task["id"],
                         "project": project_id,
@@ -354,6 +347,7 @@ def _attach_locked(
                         task.pop(key, None)
                 else:
                     require_present(task)
+                    validate_checkout(registry, task)
                 provenance = supply(Path(info["path"]), source or Path(project["source"]))
                 if provenance["method"] == "copied":
                     task["config_source"] = provenance
@@ -363,16 +357,17 @@ def _attach_locked(
                 return {**task, "rebound": True} if rebind else task
     if rebind:
         raise ManagementError("not_found", "Rebind requires a registered environment at this path")
-    provenance = supply(Path(info["path"]), source or Path(project["source"]))
     task = {
         **info,
         "id": task_id or uuid.uuid4().hex[:16],
         "project": project_id,
         "owned": owned,
+        "workspace_root": str(workspace_root or configured_root(registry)),
         "ports": {},
-        "config_source": provenance,
         "created_at": now(),
     }
+    validate_checkout(registry, task)
+    task["config_source"] = supply(Path(info["path"]), source or Path(project["source"]))
     allocate(registry, task, load(Path(info["path"]) / CONFIG))
     registry.put("taskenv", task)
     return task
@@ -384,10 +379,14 @@ def creation_location(registry: Registry, project_id: str, branch: str) -> tuple
     tasks = registry.all("taskenv")
     ids = {task["id"] for task in tasks}
     paths = {task["path"] for task in tasks}
+    workspace_root = configured_root(registry)
     for _ in range(32):
         task_id = uuid.uuid4().hex[:16]
-        path = registry.root / "projects" / project_id / f"{slug}--{task_id[:8]}"
+        path = workspace_root / project_id / f"{slug}--{task_id[:8]}"
         if task_id not in ids and str(path) not in paths and not os.path.lexists(path):
+            validate_checkout(
+                registry, {"id": task_id, "path": str(path), "workspace_root": str(workspace_root)}
+            )
             return task_id, path
     raise ManagementError("path_conflict", "Could not allocate a unique worktree ID and path")
 
@@ -399,7 +398,7 @@ def create(
         raise ManagementError("invalid_branch", "Branch cannot start with a dash")
     # Acquire before Git creates anything and retain through registration/recovery.
     project_lock = f"project-{hashlib.sha256(project_id.encode()).hexdigest()[:56]}"
-    with registry.lock(project_lock), registry.lock("registry"):
+    with registry.lock(project_lock), registry.lock("registry"), ExitStack() as held:
         project = registry.get("project", project_id)
         common = Path(project["common"])
         actual_common = Path(
@@ -409,10 +408,19 @@ def create(
             raise ManagementError("identity_changed", "Registered Git common directory changed")
         commit = git(common, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
         task_id, path = creation_location(registry, project_id, branch)
+        held.enter_context(registration_locks(registry, path))
         path.parent.mkdir(parents=True, exist_ok=True)
         git(common, "worktree", "add", "-b", branch, str(path), commit)
         try:
-            task = _attach_locked(registry, project_id, path, source, owned=True, task_id=task_id)
+            task = _attach_locked(
+                registry,
+                project_id,
+                identity(path),
+                source,
+                owned=True,
+                task_id=task_id,
+                workspace_root=path.parent.parent,
+            )
             task.update(base_commit=commit, base_ref=ref)
             registry.put("taskenv", task)
             return task
@@ -423,6 +431,7 @@ def create(
                 "id": task_id,
                 "project": project_id,
                 "owned": True,
+                "workspace_root": str(path.parent.parent),
                 "base_commit": commit,
                 "base_ref": ref,
                 "ports": {},
@@ -600,14 +609,32 @@ def forget(registry: Registry, task: dict[str, Any], *, yes: bool) -> dict[str, 
     preview = inspect(registry, task)
     preview["warning"] = "Forgetting does not stop services or delete any external resources"
     if yes:
-        with registry.lock(task["id"]):
+        with registry.lock(task["id"]), inactive_session(registry.root, task["id"]):
+            require_inactive(registry, task)
             registry.delete("taskenv", task["id"])
         preview["forgotten"] = True
     return preview
 
 
+def require_inactive(registry: Registry, task: dict[str, Any]) -> None:
+    """Check resources while the caller holds the task and inactive-session locks."""
+    if any(
+        op["taskenv"] == task["id"] and registry.busy(f"op-{op['id']}")
+        for op in registry.all("operation")
+    ):
+        raise ManagementError("busy", "An operation is still running")
+    from lodex_core.management.services import services_retired
+
+    if not services_retired(registry, task["id"]):
+        raise ManagementError(
+            "services_remaining", "Stop services and acknowledge terminal results first"
+        )
+    if any(g["taskenv"] == task["id"] and g["active"] for g in registry.all("service-delegation")):
+        raise ManagementError("delegation_active", "Revoke service delegation before retirement")
+
+
 def remove(registry: Registry, task: dict[str, Any], *, yes: bool, force: bool) -> dict[str, Any]:
-    with registry.lock(task["id"]):
+    with registry.lock(task["id"]), ExitStack() as held:
         registry.reload_task(task)
         root = require_present(task)
         current = inspect(registry, task)
@@ -625,17 +652,11 @@ def remove(registry: Registry, task: dict[str, Any], *, yes: bool, force: bool) 
         }
         if not yes:
             return preview
+        held.enter_context(inactive_session(registry.root, task["id"]))
+        require_inactive(registry, task)
         if not task["owned"] or task["main"]:
             raise ManagementError(
                 "protected_checkout", "Cannot remove an attached or main worktree"
-            )
-        # Legacy URL-only records have no managed process and do not block removal.
-        if any(
-            s.get("state") not in ("stopped", "exited", "failed", "external")
-            for s in preview["services"]
-        ):
-            raise ManagementError(
-                "services_remaining", "Stop or resolve known services before remove"
             )
         args = ["worktree", "remove"] + (["--force"] if force else []) + [str(root)]
         git(Path(task["common"]), *args)

@@ -69,6 +69,19 @@ def request(controller: Controller, operation: str, **extra: Any) -> dict[str, A
     }
 
 
+def test_controller_snapshot_does_not_need_global_allocation_lock(grants: Any) -> None:
+    registry, a, _ = grants
+    task = a.task
+    a.close()
+    before = registry.get("taskenv", task["id"])
+    with registry.lock("registry"):
+        replacement = Controller(registry, task, ["job"])
+    try:
+        assert registry.get("taskenv", task["id"]) == before
+    finally:
+        replacement.close()
+
+
 def start(controller: Controller) -> dict[str, Any]:
     prepared = controller.dispatch(request(controller, "start"))
     observed = services.launch(prepared["record"], prepared["payload"])
@@ -122,10 +135,40 @@ def test_controller_reserves_but_does_not_execute_repo_code(
 ) -> None:
     registry, a, _ = grants
     monkeypatch.setattr(services, "launch", lambda *_: pytest.fail("Manager executed repo code"))
+    monkeypatch.setenv("CODEX_NETWORK_PROXY_ACTIVE", "1")
+    monkeypatch.setenv("HTTPS_PROXY", "http://manager-only.invalid:1234")
     result = a.dispatch(request(a, "start"))
     assert result["payload"]["env"]["TOKEN"] == "fixture-self-token"
+    assert "HTTPS_PROXY" not in result["payload"]["env"]
+    assert "CODEX_NETWORK_PROXY_ACTIVE" not in result["payload"]["env"]
     assert not Path(result["record"]["directory"]).exists()
     assert registry.get("service", result["record"]["id"])["state"] == "starting"
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_delegated_temp_defaults_to_grant_without_overriding_project(
+    grants: Any, monkeypatch: pytest.MonkeyPatch, explicit: bool
+) -> None:
+    registry, a, _ = grants
+    monkeypatch.setenv("TMPDIR", "/controller-only-temp")
+    project_temp = str(Path(a.task["path"]) / "project-temp")
+    if explicit:
+        a.close()
+        config = Path(a.task["path"]) / CONFIG
+        config.write_text(
+            config.read_text().replace("[env]\n", f"[env]\nTMPDIR={json.dumps(project_temp)}\n")
+        )
+        a = Controller(registry, a.task, ["job"])
+    try:
+        prepared = a.dispatch(request(a, "start"))
+        grant_temp = Path(prepared["record"]["delegated"]["root"]) / "t"
+        assert prepared["payload"]["env"]["TMPDIR"] == (
+            project_temp if explicit else str(grant_temp)
+        )
+        assert not grant_temp.exists()  # Only the worker may create its temp directory.
+    finally:
+        if explicit:
+            a.close()
 
 
 def test_changed_recipe_cannot_expand_secret_authority(
@@ -312,6 +355,54 @@ def test_terminal_supervisor_waits_for_durable_manager_receipt(
     assert services.refresh(registry.get("service", record["id"]))["state"] == "exited"
     replacement = start(a)
     assert replacement["delegated"]["launch"] != record["delegated"]["launch"]
+
+
+@pytest.mark.parametrize("action", ["remove", "forget", "rebind"])
+def test_retirement_requires_ack_for_the_current_delegated_launch(grants: Any, action: str) -> None:
+    registry, a, _ = grants
+    task = a.task
+    root = Path(task["path"])
+    start(a)
+    assert services.stop(registry, task["id"], "job")["terminal_acknowledged"]
+    current = start(a)
+    a.close()
+    os.kill(current["pid"], signal.SIGTERM)  # End only the fixture job, outside Lodex stop.
+    deadline = time.monotonic() + 3
+    while services.record_control(current, "inspect")["state"] not in {"exited", "failed"}:
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+
+    def retire() -> None:
+        if action == "remove":
+            worktrees.remove(registry, task, yes=True, force=True)
+        elif action == "forget":
+            worktrees.forget(registry, task, yes=True)
+        else:
+            worktrees.attach(registry, task["project"], root, rebind=True, yes=True)
+
+    with pytest.raises(ManagementError) as blocked:
+        retire()
+    assert blocked.value.code == ("busy" if action == "rebind" else "services_remaining")
+    assert root.is_dir() and registry.get("taskenv", task["id"]) == task
+    assert len(registry.all(services.TERMINAL_KIND)) == 1  # Only the previous launch was ACKed.
+    assert services.record_control(current, "inspect")["state"] == "exited"
+    assert services.stop(registry, task["id"], "job")["terminal_acknowledged"]
+    retire()
+
+
+def test_nested_attach_waits_for_service_that_outlives_its_worker(grants: Any) -> None:
+    registry, a, _ = grants
+    record = start(a)
+    a.close()
+    root = Path(a.task["path"])
+    nested = root / "nested"
+    worktrees.git(root, "worktree", "add", "--detach", str(nested), "HEAD")
+    with pytest.raises(ManagementError) as blocked:
+        worktrees.attach(registry, a.task["project"], nested)
+    assert blocked.value.code == "services_remaining"
+    assert services.record_control(record, "inspect")["pid"] == record["pid"]
+    assert services.stop(registry, a.task["id"], "job")["terminal_acknowledged"]
+    assert worktrees.attach(registry, a.task["project"], nested)["path"] == str(nested)
 
 
 def test_acknowledgement_failure_keeps_the_recorded_terminal_result(

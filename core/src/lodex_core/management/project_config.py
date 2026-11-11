@@ -122,6 +122,7 @@ def load(path: Path) -> dict[str, Any]:
                     "url",
                     "ready_port",
                     "ready_argv",
+                    "allow_local_binding",
                     "ready_timeout",
                     "stop_timeout",
                 }
@@ -159,6 +160,8 @@ def load(path: Path) -> dict[str, Any]:
                         "invalid_config",
                         "ready_argv needs a string array and cannot combine with ready_port",
                     )
+            if "allow_local_binding" in spec and type(spec["allow_local_binding"]) is not bool:
+                raise ManagementError("invalid_config", "allow_local_binding must be a boolean")
             stop_timeout = spec.get("stop_timeout", 3)
             if type(stop_timeout) not in (int, float) or not 0 < stop_timeout <= 300:
                 raise ManagementError("invalid_config", "stop_timeout must be >0 and <=300")

@@ -214,6 +214,33 @@ def worker_config(
         return management_result(ctx, result, as_json)
 
 
+@worktree_app.command("reconcile-worker")
+def reconcile_worker(
+    ctx: typer.Context,
+    target: Target = None,
+    record_id: Annotated[
+        str | None,
+        typer.Option(help="Worker launch record ID returned by preview; not the native UUID."),
+    ] = None,
+    evidence: Annotated[
+        str | None,
+        typer.Option(
+            help="How the saved runtime's agent and writers were verified exited; no secrets."
+        ),
+    ] = None,
+    yes: Yes = False,
+    as_json: Json = False,
+) -> int:
+    """Preview an unconfirmed worker exit, or explicitly attest it and retain an audit receipt."""
+    from lodex_core.management.worker_sessions import reconcile
+
+    with registry() as store:
+        result = reconcile(
+            store, resolve(store, target), yes=yes, record_id=record_id, evidence=evidence
+        )
+        return management_result(ctx, result, as_json)
+
+
 @worktree_app.command("list")
 def worktree_list(ctx: typer.Context, as_json: Json = False) -> int:
     """List registered environments and their inspection state."""
@@ -302,8 +329,8 @@ def cleanup(
         policy = policies.read(store, task, worker_policy)
 
         def execute(result: Path) -> list[str]:
-            # Only this operation's result file is opened beneath central state.
-            # Its parent, records and logs remain inaccessible to checkout code.
+            # New policies stage results in the task's runtime. Legacy snapshots
+            # retain their narrow central result-file exception without rewriting.
             rule = f"permissions.{policy['permission_profile']}.filesystem=" + policies.toml_value(
                 {**policy["filesystem"], str(result): "write"}
             )
@@ -325,6 +352,7 @@ def cleanup(
             execution=execute,
             execution_env={**policy["routes"], **policy["launch_env"]},
             approved_secret_refs=policy["handoff"]["secret_refs"],
+            result_runtime=policy.get("runtime_identity"),
         )
         return management_result(ctx, result, as_json, ok=result["state"] == "succeeded")
 

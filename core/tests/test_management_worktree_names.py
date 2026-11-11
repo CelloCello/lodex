@@ -8,6 +8,7 @@ import pytest
 from lodex_core.management import project_config, worktrees
 from lodex_core.management.common import ManagementError
 from lodex_core.management.store import Registry
+from lodex_core.management.workspace import configured_root
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +36,7 @@ def test_readable_directory_keeps_full_id_and_original_branch(
     task = worktrees.create(registry, "sample", "HEAD", branch)
     path = Path(task["path"])
     assert len(task["id"]) == 16
-    assert path == registry.root / "projects" / "sample" / f"{slug}--{task['id'][:8]}"
+    assert path == configured_root(registry) / "sample" / f"{slug}--{task['id'][:8]}"
     assert worktrees.inspect(registry, task)["branch"] == branch
     assert worktrees.resolve(registry, str(path / ".lodex"))["id"] == task["id"]
     assert worktrees.resolve(registry, task["id"])["path"] == str(path)
@@ -83,7 +84,7 @@ def test_full_id_collision_with_different_slug_does_not_overwrite_task(
 def test_existing_filesystem_entry_is_not_reused(
     registry: Registry, monkeypatch: pytest.MonkeyPatch, occupied: str
 ) -> None:
-    path = registry.root / "projects" / "sample" / "feature-login--aaaaaaaa"
+    path = configured_root(registry) / "sample" / "feature-login--aaaaaaaa"
     path.parent.mkdir(parents=True)
     if occupied == "directory":
         path.mkdir()

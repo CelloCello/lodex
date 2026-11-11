@@ -34,13 +34,17 @@ def test_prepare_runs_without_services(registry: Registry, repo: Path) -> None:
 
 
 def test_restricted_operation_passes_project_inputs_only_through_pipe(
-    registry: Registry, repo: Path
+    registry: Registry, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("CODEX_NETWORK_PROXY_ACTIVE", "1")
+    monkeypatch.setenv("HTTPS_PROXY", "http://manager-only.invalid:1234")
     (repo / "cleanup.py").write_text(
         "import os\n"
         "assert os.environ['PROJECT_ONLY']=='repo input'\n"
         "assert os.environ['TOKEN']=='synthetic-cleanup-secret'\n"
         "assert os.environ['TRUSTED_ROUTE']=='reviewed route'\n"
+        "assert 'HTTPS_PROXY' not in os.environ\n"
+        "assert 'CODEX_NETWORK_PROXY_ACTIVE' not in os.environ\n"
         "print('repo inputs delivered')\n"
     )
     (repo / CONFIG).write_text(
@@ -56,6 +60,8 @@ def test_restricted_operation_passes_project_inputs_only_through_pipe(
         "assert 'PROJECT_ONLY' not in os.environ\n"
         "assert 'TOKEN' not in os.environ\n"
         "assert 'LODEX_RESULT_FILE' not in os.environ\n"
+        "assert 'HTTPS_PROXY' not in os.environ\n"
+        "assert 'CODEX_NETWORK_PROXY_ACTIVE' not in os.environ\n"
         "assert os.environ['TRUSTED_ROUTE']=='reviewed route'\n"
         "payload=json.load(sys.stdin)\n"
         "os.execvpe(payload['argv'][0],payload['argv'],payload['environment'])\n"
@@ -69,6 +75,44 @@ def test_restricted_operation_passes_project_inputs_only_through_pipe(
     )
     assert result["state"] == "succeeded", operations.logs(result)["tail"]
     assert "repo inputs delivered" in operations.logs(result)["tail"]
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_direct_prepare_retains_only_active_caller_network_route(
+    registry: Registry, repo: Path, monkeypatch: pytest.MonkeyPatch, active: bool
+) -> None:
+    monkeypatch.delenv("CODEX_NETWORK_PROXY_ACTIVE", raising=False)
+    if active:
+        monkeypatch.setenv("CODEX_NETWORK_PROXY_ACTIVE", "1")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:12345")
+    monkeypatch.setenv("npm_config_https_proxy", "http://127.0.0.1:12345")
+    monkeypatch.setenv("NODE_USE_ENV_PROXY", "1")
+    monkeypatch.setenv("UNRELATED_PROJECT_TOKEN", "must-not-inherit")
+    script = (
+        "import os,json;from pathlib import Path;"
+        "Path('seen.json').write_text(json.dumps({k:os.environ.get(k) for k in "
+        "['HTTPS_PROXY','npm_config_https_proxy','NODE_USE_ENV_PROXY','ALL_PROXY',"
+        "'CODEX_NETWORK_PROXY_ACTIVE','UNRELATED_PROJECT_TOKEN']}))"
+    )
+    monkeypatch.delenv("ALL_PROXY", raising=False)
+    (repo / CONFIG).write_text(
+        'schema_version=1\n[env]\nHTTPS_PROXY="http://project.invalid:80"\n'
+        'ALL_PROXY="http://stale-project.invalid:80"\n[commands.prepare]\nargv='
+        + json.dumps([sys.executable, "-c", script]) + "\n"
+    )
+    task = register(registry, repo)
+    result = operations.run(registry, task, "prepare")
+    assert result["state"] == "succeeded", operations.logs(result)["tail"]
+    seen = json.loads((repo / "seen.json").read_text())
+    assert seen["UNRELATED_PROJECT_TOKEN"] is None
+    assert seen["HTTPS_PROXY"] == (
+        "http://127.0.0.1:12345" if active else "http://project.invalid:80"
+    )
+    assert seen["npm_config_https_proxy"] == ("http://127.0.0.1:12345" if active else None)
+    assert seen["NODE_USE_ENV_PROXY"] == ("1" if active else None)
+    assert seen["CODEX_NETWORK_PROXY_ACTIVE"] == ("1" if active else None)
+    assert seen["ALL_PROXY"] == (None if active else "http://stale-project.invalid:80")
+    assert "127.0.0.1:12345" not in json.dumps(result)
 
 
 def test_prepare_delivers_project_env_and_secret_free_handoff_for_two_taskenvs(

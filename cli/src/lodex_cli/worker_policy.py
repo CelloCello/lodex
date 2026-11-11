@@ -23,6 +23,7 @@ from lodex_core.management.common import ManagementError, private_dir, read_json
 from lodex_core.management.delegation import KIND, Client
 from lodex_core.management.project_config import CONFIG, check_command, digest, load
 from lodex_core.management.store import Registry
+from lodex_core.management.workspace import runtime_base, validate_checkout
 
 
 def toml_value(value: Any) -> str:
@@ -62,11 +63,12 @@ def tool_overrides(root: Path, profile: str, codex_home: Path) -> list[str]:
         section: {identity: {"enabled": False} for identity in sorted(identities)}
         for section, identities in ids.items()
     }
-    # Codex 0.166 can expose its built-in worktree MCP namespace without an
+    # Codex can expose built-in task/worktree MCP namespaces without an
     # entry in local config. Disable the namespace alongside the feature gates;
     # a disabled MCP entry still needs a transport shape. Never replace a
     # configured transport or copy its credentials into argv.
-    sections["mcp_servers"].setdefault("codex_worktrees", {"enabled": False, "command": "false"})
+    for namespace in ("codex_worktrees", "codex_tui"):
+        sections["mcp_servers"].setdefault(namespace, {"enabled": False, "command": "false"})
     return [section + "=" + toml_value(values) for section, values in sections.items()]
 
 
@@ -86,6 +88,7 @@ def render(
     """Create a protected settings snapshot. Does not launch or approve anything."""
     registry.reload_task(task)
     root = worktrees.require_present(task)
+    validate_checkout(registry, task, worker=True)
     worktrees.require_prepared(task)
     preparation = registry.get("operation", prepare_operation)
     if (
@@ -110,18 +113,23 @@ def render(
     if not cache.is_absolute():
         raise ManagementError("worker_cache", "Pass the observed absolute uv cache directory")
     cache = cache.resolve()
-    for protected_root in (registry.root, Path(task["common"])):
+    protected_roots = [registry.root, Path(task["common"])]
+    protected_roots.extend(
+        Path(t["workspace_root"]) for t in registry.all("taskenv") if "workspace_root" in t
+    )
+    for protected_root in protected_roots:
         if cache.is_relative_to(protected_root) or protected_root.is_relative_to(cache):
             raise ManagementError(
-                "worker_cache", "The uv cache cannot overlap central state or Git metadata"
+                "worker_cache", "The uv cache cannot overlap state, workspaces or Git metadata"
             )
     identity = uuid.uuid4().hex
     permission = f"lodex-task-{identity}"
-    runtime = registry.root / "worker-runtime" / identity[:12]
+    runtime = runtime_base(registry, task) / "worker-runtime" / identity[:12]
     grant: dict[str, Any] | None = None
     routes: dict[str, str] = {}
     sockets: dict[str, str] = {}
     grant_root: str | None = None
+    local_binding = False
     if delegation:
         grant = registry.get(KIND, delegation)
         if not grant["active"] or grant["taskenv"] != task["id"]:
@@ -130,6 +138,9 @@ def render(
             raise ManagementError("delegation_config_changed", "Review and create a new delegation")
         for name in grant["services"]:
             check_command(root, config["services"][name], config)
+            spec = config["services"][name]
+            if spec.get("allow_local_binding", "ready_port" in spec):
+                local_binding = True
         grant_root = grant["runtime_root"]
         credential = Path(grant_root) / "client.json"
         Client(credential).request("list", target=task["id"])
@@ -137,6 +148,7 @@ def render(
         sockets[grant["socket"]] = "allow"
         sockets[grant_root] = "allow"
     private_dir(runtime)
+    runtime_stat = runtime.stat()
     temporary = runtime / "tmp"
     private_dir(temporary)
     routes["TMPDIR"] = str(temporary)
@@ -145,15 +157,19 @@ def render(
         str(task["common"]): "read",
         str(task["git_dir"]): "read",
         str(cache): "write",
-        str(Path(tempfile.gettempdir()).resolve()): "deny",
+        str(Path(tempfile.gettempdir()).resolve()): "read" if "workspace_root" in task else "deny",
     }
     if os.name == "posix":
-        filesystem[str(Path("/tmp").resolve())] = "deny"
+        filesystem[str(Path("/tmp").resolve())] = "read" if "workspace_root" in task else "deny"
     for peer in registry.all("taskenv"):
+        if "workspace_root" in peer:
+            # A stable read-only parent also covers peers created after this
+            # policy. Own paths are opened below; never grant the whole root.
+            filesystem[peer["workspace_root"]] = "read"
         if peer["id"] != task["id"] and peer["path"] != str(root):
             # A registered source checkout can contain shared Git metadata. Keep
             # its metadata readable through the more specific rules above.
-            filesystem[peer["path"]] = "deny"
+            filesystem[peer["path"]] = "read" if "workspace_root" in peer else "deny"
     filesystem.update({str(root): "write", str(runtime): "write"})
     if grant_root is not None:
         filesystem[grant_root] = "write"
@@ -175,6 +191,8 @@ def render(
         "features.hooks": False,
         "features.js_repl": False,
         "features.multi_agent": False,
+        "features.multi_agent_v2": False,
+        "features.multi_agent_v2_dynamic_tools": False,
         "features.apps": False,
         "features.plugins": False,
         "features.image_generation": False,
@@ -195,6 +213,7 @@ def render(
         f"permissions.{permission}.filesystem": filesystem,
         # The proxy enforces the Unix-socket allowlist even without TCP hosts.
         f"permissions.{permission}.network.enabled": True,
+        f"permissions.{permission}.network.allow_local_binding": local_binding,
         f"permissions.{permission}.network.domains": {host: "allow" for host in hosts or []},
         f"permissions.{permission}.network.unix_sockets": sockets,
     }
@@ -212,6 +231,10 @@ def render(
         "path": str(root),
         "task_identity": worktrees.binding(task),
         "runtime_root": str(runtime),
+        "runtime_identity": {
+            "root": str(runtime),
+            "inode": [runtime_stat.st_dev, runtime_stat.st_ino],
+        },
         "profile": profile,
         "launch_env": {"CODEX_HOME": str(codex_home)},
         "permission_profile": permission,
@@ -261,4 +284,5 @@ def read(registry: Registry, task: dict[str, Any], path: Path) -> dict[str, Any]
     if data.get("task_identity") != worktrees.binding(task):
         raise ManagementError("identity_changed", "Worker policy binding changed; regenerate it")
     worktrees.require_present(task)
+    validate_checkout(registry, task, worker=True)
     return data

@@ -32,7 +32,9 @@ from lodex_core.management.processes import (
     signal_group,
 )
 from lodex_core.management.project_config import CONFIG, check_command, digest, load, supply
+from lodex_core.management.service_runtime import runtime_root
 from lodex_core.management.store import Registry
+from lodex_core.management.workspace import validate_checkout
 from lodex_core.management.worktrees import git, require_prepared, require_present
 
 
@@ -44,9 +46,9 @@ def inspect_operation(registry: Registry, record: dict[str, Any]) -> dict[str, A
     return record
 
 
-def result_data(path: Path, known: list[str]) -> dict[str, Any]:
+def result_data(path: Path, known: list[str], *, dir_fd: int | None = None) -> dict[str, Any]:
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
     except FileNotFoundError:
         return {"resources": [], "urls": []}
     except OSError as exc:
@@ -116,10 +118,15 @@ def run(
     execution: Callable[[Path], list[str]] | None = None,
     execution_env: dict[str, str] | None = None,
     approved_secret_refs: dict[str, str] | None = None,
+    result_runtime: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with registry.lock(task["id"]), ExitStack() as held:
         registry.reload_task(task)
         root = require_present(task)
+        if execution is not None:
+            # Registration takes this task lock too. Recheck the saved sandbox's
+            # write scope after acquiring it, before executing any cleanup code.
+            validate_checkout(registry, task, worker=True)
         if command != "prepare":
             require_prepared(task)
         if command == "prepare":
@@ -150,6 +157,12 @@ def run(
         directory = registry.root / "operations" / operation_id
         private_dir(directory)
         result_path = directory / "result.json"
+        result_fd = None
+        if result_runtime is not None:
+            # Keep an open, identity-checked directory handle. Repo code can
+            # write its result, but cannot redirect manager reads or unlinking.
+            result_fd = held.enter_context(runtime_root(result_runtime))
+            result_path = Path(result_runtime["root"]) / f"result-{operation_id}.json"
         values["LODEX_RESULT_FILE"] = str(result_path)
         record: dict[str, Any] = {
             "id": operation_id,
@@ -177,7 +190,10 @@ def run(
             try:
                 for sig in previous:
                     signal.signal(sig, interrupted)
-                environment = {**process_env(values), **(execution_env or {})}
+                environment = {
+                    **process_env(values, caller_network=execution is None),
+                    **(execution_env or {}),
+                }
                 # Repo inputs reach the command only after the wrapper establishes
                 # its sandbox. Loader variables must not affect that outer process.
                 launcher_environment = (
@@ -239,7 +255,11 @@ def run(
                 if stop_deadline is not None:
                     record["state"] = "interrupted"
                 try:
-                    record["result"] = result_data(result_path, known)
+                    record["result"] = result_data(
+                        Path(result_path.name) if result_fd is not None else result_path,
+                        known,
+                        dir_fd=result_fd,
+                    )
                 except ManagementError as exc:
                     if stop_deadline is not None:
                         record["error"] = "invalid_partial_result"
@@ -253,7 +273,12 @@ def run(
                 if child is not None and child.stdout is not None:
                     child.stdout.close()
                 log.write(redactor.feed(b"", final=True))
-                result_path.unlink(missing_ok=True)
+                try:
+                    os.unlink(
+                        result_path.name if result_fd is not None else result_path, dir_fd=result_fd
+                    )
+                except FileNotFoundError:
+                    pass
                 record["observed_at"] = now()
                 if command == "prepare" and record["state"] == "succeeded":
                     task.pop("prepare_required", None)
