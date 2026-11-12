@@ -27,9 +27,8 @@ from lodex_cli import worker_policy
 from lodex_core.management.common import ManagementError, now, read_json, write_private
 from lodex_core.management.delegation import KIND, Client
 from lodex_core.management.environment import process_env
-from lodex_core.management.project_config import CONFIG, digest, load
 from lodex_core.management.store import Registry
-from lodex_core.management.worker_sessions import session_lock
+from lodex_core.management.worker_sessions import TERMINAL_STATES, session_lock
 
 
 def native_storage(policy: dict[str, Any]) -> dict[str, Any] | None:
@@ -232,6 +231,7 @@ def runtime_context(kind: str) -> dict[str, str]:
         "kind": "core",
         "machine": os.uname().nodename,
         "session": os.environ.get("HC_SESSION", ""),
+        "socket": os.environ.get("HC_SOCKET", ""),
         "terminal": os.environ["HC_TERMINAL_ID"],
     }
 
@@ -253,15 +253,9 @@ def run(policy_path: Path, kind: str, task_file: Path, resume: str | None = None
     try:
         raw = read_json(policy_path)
         task = store.get("taskenv", raw["taskenv"])
-        with session_lock(store.root, task["id"]) as record_path:
+        child_fds: list[int] = []
+        with session_lock(store.root, task["id"], child_fds=child_fds) as record_path:
             policy = worker_policy.read(store, task, policy_path)
-            if (
-                digest(load(Path(task["path"]) / CONFIG))
-                != policy["handoff"]["configuration_digest"]
-            ):
-                raise ManagementError(
-                    "worker_unprepared", "Recipe changed after preparation; review it"
-                )
             if policy["delegation"] is not None:
                 grant = store.get(KIND, policy["delegation"])
                 if not grant["active"] or grant["taskenv"] != task["id"]:
@@ -278,7 +272,7 @@ def run(policy_path: Path, kind: str, task_file: Path, resume: str | None = None
             saved_session = None
             if record_path.exists():
                 previous = read_json(record_path)
-                if previous["state"] == "running":
+                if previous["state"] not in TERMINAL_STATES:
                     raise ManagementError(
                         "worker_unknown",
                         "Previous exit is unconfirmed; inspect its saved runtime before recovery",
@@ -356,7 +350,10 @@ def run(policy_path: Path, kind: str, task_file: Path, resume: str | None = None
                     signal.signal(sig, interrupted)
                 before = native_storage(policy) if resume is None else None
                 child = subprocess.Popen(
-                    arguments, cwd=task["path"], env={**os.environ, **policy["launch_env"]}
+                    arguments,
+                    cwd=task["path"],
+                    env={**os.environ, **policy["launch_env"]},
+                    pass_fds=child_fds,
                 )
                 record["exit_code"] = child.wait()
                 record["state"] = "exited"

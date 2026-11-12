@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import selectors
 import shlex
 import shutil
 import subprocess
@@ -21,6 +22,86 @@ from lodex_core.management.delegation import Client, revoke
 from lodex_core.management.project_config import CONFIG
 
 from .test_service_delegation import delegated as delegated
+
+
+@pytest.mark.skipif(
+    os.environ.get("LODEX_TEST_SANDBOX") != "1" or sys.platform != "darwin",
+    reason="Opt-in real macOS sandbox boundary test",
+)
+def test_running_worker_cannot_modify_peer_created_after_launch(
+    delegated: Any,
+    draft: Any,
+) -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node required for realpath regression")
+    policy = draft["policy"]
+    store = delegated["store"]
+    task = delegated["tasks"][0]
+    # The child stays inside one OS sandbox while the manager creates C.
+    program = r"""
+const fs=require('fs'), readline=require('readline');
+const root=process.cwd();
+fs.realpathSync(root); fs.realpathSync(process.env.TMPDIR);
+fs.writeFileSync('own-before','ok');
+console.log('ready');
+readline.createInterface({input:process.stdin}).on('line', line => {
+  const {peer,central,peerRuntime}=JSON.parse(line);
+  if(fs.readFileSync(peer+'/marker','utf8')!=='untouched') throw Error('peer read');
+  const paths=[peer+'/marker',peer+'/new-file',peerRuntime+'/new-file',central+'/management.db'];
+  for(const p of paths) {
+    try { fs.writeFileSync(p,'changed'); throw Error('write escaped: '+p); }
+    catch(e) { if(!['EACCES','EPERM'].includes(e.code)) throw e; }
+  }
+  try {fs.readFileSync(central+'/management.db'); throw Error('central read');}
+  catch(e) {if(!['EACCES','EPERM'].includes(e.code)) throw e;}
+  fs.writeFileSync('own-after','ok'); console.log('isolated'); process.exit(0);
+});
+"""
+    child = subprocess.Popen(
+        [*policy["sandbox_argv"], "--", node, "-e", program],
+        env={**os.environ, **policy["launch_env"], **policy["routes"]},
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert child.stdout is not None
+        with selectors.DefaultSelector() as selector:
+            selector.register(child.stdout, selectors.EVENT_READ)
+            assert selector.select(timeout=10), "Sandbox did not become ready"
+        first = child.stdout.readline()
+        if first != "ready\n":
+            _, error = child.communicate(timeout=5)
+            pytest.fail(first + error)
+        later = worktrees.create(store, task["project"], "HEAD", "late-peer")
+        (Path(later["path"]) / "marker").write_text("untouched")
+        from lodex_core.management.workspace import runtime_base
+
+        peer_runtime = runtime_base(store, later)
+        peer_runtime.mkdir(parents=True)
+        output, error = child.communicate(
+            json.dumps(
+                {
+                    "peer": later["path"],
+                    "central": str(store.root),
+                    "peerRuntime": str(peer_runtime),
+                }
+            )
+            + "\n",
+            timeout=15,
+        )
+        assert child.returncode == 0, output + error
+        assert "isolated" in output
+        assert (Path(later["path"]) / "marker").read_text() == "untouched"
+    finally:
+        if child.poll() is None:
+            child.terminate()
+            child.wait(timeout=5)
+        for stream in (child.stdin, child.stdout, child.stderr):
+            if stream is not None:
+                stream.close()
 
 
 @pytest.fixture
@@ -64,7 +145,7 @@ def test_draft_is_task_bound_secret_free_and_does_not_install_profiles(
     policy = draft["policy"]
     root = delegated["store"].root
     assert policy["filesystem"][str(root)] == "deny"
-    assert policy["filesystem"][delegated["tasks"][1]["path"]] == "deny"
+    assert policy["filesystem"][delegated["tasks"][1]["path"]] == "read"
     assert policy["filesystem"][delegated["tasks"][0]["path"]] == "write"
     assert policy["routes"]["LODEX_SERVICE_DELEGATION"] == delegated["infos"][0]["credential_file"]
     assert "synthetic-delegation-token" not in json.dumps(policy)
@@ -82,6 +163,9 @@ def test_draft_is_task_bound_secret_free_and_does_not_install_profiles(
         assert tomllib.loads(override)[section][identity]["enabled"] is False
     mcp = tomllib.loads(next(arg for arg in policy["agent_argv"] if arg.startswith("mcp_servers=")))
     assert mcp["mcp_servers"]["codex_worktrees"]["enabled"] is False
+    assert mcp["mcp_servers"]["codex_tui"]["enabled"] is False
+    assert "features.multi_agent_v2=false" in policy["agent_argv"]
+    assert "features.multi_agent_v2_dynamic_tools=false" in policy["agent_argv"]
     assert (
         worker_policy.read(delegated["store"], delegated["tasks"][0], Path(policy["policy_file"]))[
             "id"
@@ -94,6 +178,68 @@ def test_draft_is_task_bound_secret_free_and_does_not_install_profiles(
     untrusted.write_text(json.dumps(policy))
     with pytest.raises(ManagementError):
         worker_policy.read(delegated["store"], delegated["tasks"][0], untrusted)
+
+
+def test_old_overlapping_registration_cannot_issue_or_reuse_policy(
+    delegated: Any, draft: Any
+) -> None:
+    store, task = delegated["store"], delegated["tasks"][0]
+    policy = draft["policy"]
+    saved = Path(policy["policy_file"]).read_bytes()
+    task["workspace_root"] = task["path"]
+    store.put("taskenv", task)
+    with pytest.raises(ManagementError) as issuing:
+        worker_policy.render(store, task, **draft["arguments"])
+    assert issuing.value.code == "workspace_overlap"
+    with pytest.raises(ManagementError) as reading:
+        worker_policy.read(store, task, Path(policy["policy_file"]))
+    assert reading.value.code == "workspace_overlap"
+    assert Path(policy["policy_file"]).read_bytes() == saved
+
+
+def test_nested_registration_remains_manageable_but_cannot_issue_isolated_worker_policy(
+    delegated: Any, draft: Any
+) -> None:
+    store, task = delegated["store"], delegated["tasks"][0]
+    nested = Path(task["path"]) / "nested"
+    worktrees.git(Path(task["common"]), "worktree", "add", "--detach", str(nested), "HEAD")
+    inner = worktrees.attach(store, task["project"], nested)
+    assert worktrees.resolve(store, str(nested))["id"] == inner["id"]
+    for candidate in (task, inner):
+        with pytest.raises(ManagementError) as error:
+            worker_policy.render(store, candidate, **draft["arguments"])
+        assert error.value.code == "workspace_overlap"
+
+
+def test_restricted_cleanup_rechecks_overlap_under_its_task_lock(
+    delegated: Any, draft: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, task = delegated["store"], delegated["tasks"][0]
+    nested = Path(task["path"]) / "nested"
+    worktrees.git(Path(task["common"]), "worktree", "add", "--detach", str(nested), "HEAD")
+    read = worker_policy.read_snapshot
+
+    def read_before_registration(*args: Any) -> dict[str, Any]:
+        policy = read(*args)
+        worktrees.attach(store, task["project"], nested)
+        return policy
+
+    monkeypatch.setattr(worker_policy, "read_snapshot", read_before_registration)
+    result = CliRunner().invoke(
+        app,
+        [
+            "cleanup",
+            "--target",
+            task["id"],
+            "--worker-policy",
+            draft["policy"]["policy_file"],
+            "--json",
+        ],
+    )
+    assert (
+        result.exit_code != 0 and json.loads(result.stdout)["error"]["code"] == "workspace_overlap"
+    )
+    assert not any(op["command"] == "cleanup" for op in store.all("operation"))
 
 
 def test_policy_ignores_legacy_inode_but_rebind_invalidates_policy_and_prepare(
@@ -201,7 +347,7 @@ def test_cleanup_cannot_resolve_new_secret_references_from_modified_recipe(
 
 
 def test_new_grant_generates_new_routes_without_old_runtime_or_peer_changes(
-    delegated: Any, draft: Any
+    delegated: Any, draft: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     store, task = delegated["store"], delegated["tasks"][0]
     old, peer = delegated["infos"]
@@ -212,9 +358,11 @@ def test_new_grant_generates_new_routes_without_old_runtime_or_peer_changes(
     delegated["processes"][0].terminate()
     delegated["processes"][0].wait(timeout=5)
     replacement = delegated["delegate"](task)
+    monkeypatch.setenv("LODEX_WORKSPACE_ROOT", str(tmp_path / "future-workspaces"))
     arguments = {**draft["arguments"], "delegation": replacement["id"]}
     fresh = worker_policy.render(store, task, **arguments)
     assert fresh["taskenv"] == draft["policy"]["taskenv"]
+    assert Path(fresh["runtime_root"]).is_relative_to(Path(task["workspace_root"]))
     assert fresh["permission_profile"] != draft["policy"]["permission_profile"]
     assert fresh["routes"]["LODEX_SERVICE_DELEGATION"] == replacement["credential_file"]
     assert old["runtime_root"] not in fresh["filesystem"]
@@ -270,7 +418,7 @@ print('own-service-and-temp-allowed')
     or shutil.which("codex") is None,
     reason="Opt-in disposable Codex sandbox test",
 )
-def test_restricted_cleanup_collects_results_without_central_or_peer_access(
+def test_restricted_cleanup_collects_results_without_central_access_or_peer_writes(
     delegated: Any, draft: Any
 ) -> None:
     task, peer = delegated["tasks"]
@@ -282,10 +430,11 @@ def test_restricted_cleanup_collects_results_without_central_or_peer_access(
 from pathlib import Path
 assert os.environ['TOKEN']=='synthetic-delegation-token'
 assert 'UNRELATED_SECRET' not in os.environ
-for path in ({str(central)!r}, {str(marker)!r}):
+for path in ({str(central)!r},):
  try: Path(path).read_bytes()
  except PermissionError: pass
- else: raise SystemExit('cross-task read allowed')
+ else: raise SystemExit('central read allowed')
+assert Path({str(marker)!r}).read_text() == 'untouched'
 try: Path({str(marker)!r}).write_text('changed')
 except PermissionError: pass
 else: raise SystemExit('cross-task write allowed')
@@ -334,6 +483,86 @@ Path(os.environ['LODEX_RESULT_FILE']).write_text(json.dumps({{'resources':[],'ur
     assert json.loads(failed.stdout)["result"]["state"] == "failed"
     assert delegated["store"].get("service-delegation", delegated["infos"][0]["id"])["active"]
     assert root.is_dir() and marker.read_text() == "untouched"
+
+
+@pytest.mark.skipif(
+    os.environ.get("LODEX_TEST_SANDBOX") != "1" or sys.platform != "darwin",
+    reason="Opt-in real loopback service sandbox test",
+)
+@pytest.mark.parametrize(
+    "readiness,binding",
+    [("ready_port", None), ("ready_argv", True), ("ready_argv", False), ("ready_port", False)],
+)
+def test_grant_runs_real_http_service_in_worker_sandbox(
+    delegated: Any,
+    draft: Any,
+    readiness: str,
+    binding: bool | None,
+) -> None:
+    store, task = delegated["store"], delegated["tasks"][0]
+    delegated["processes"][0].terminate()
+    delegated["processes"][0].wait(timeout=5)
+    root = Path(task["path"])
+    (root / "job.py").write_text(
+        "import os\nfrom http.server import HTTPServer,SimpleHTTPRequestHandler\n"
+        "HTTPServer(('127.0.0.1',int(os.environ['PORT'])),SimpleHTTPRequestHandler).serve_forever()\n"
+    )
+    recipe = root / CONFIG
+    ready = 'ready_port="PORT"'
+    if readiness == "ready_argv":
+        probe = "import os,urllib.request;assert urllib.request.urlopen('http://127.0.0.1:'+os.environ['PORT']+'/README.md',timeout=1).status==200"
+        ready = "ready_argv=" + json.dumps([sys.executable, "-c", probe])
+    if binding is not None:
+        ready += "\nallow_local_binding=" + str(binding).lower()
+    recipe.write_text(
+        recipe.read_text().replace(
+            "ready_argv=" + json.dumps([sys.executable, "-c", "pass"]),
+            ready,
+        )
+        + "\n[ports]\nPORT=0\n"
+    )
+    prepared = operations.run(store, task, "prepare")
+    grant = delegated["delegate"](task)
+    policy = worker_policy.render(
+        store,
+        task,
+        **{
+            **draft["arguments"],
+            "prepare_operation": prepared["id"],
+            "delegation": grant["id"],
+            "hosts": ["127.0.0.1"],
+        },
+    )
+    program = """import os,urllib.request
+from pathlib import Path
+from lodex_core.management.delegation import Client
+client=Client(Path(os.environ['LODEX_SERVICE_DELEGATION']))
+try:
+ client.perform('start','job',None)
+ response=urllib.request.urlopen('http://127.0.0.1:PORT/README.md',timeout=5)
+ assert response.status==200
+ print('http-ready')
+finally:
+ assert client.perform('stop','job',None)['state']=='stopped'
+""".replace("PORT", str(task["ports"]["PORT"]))
+    expected = "http-ready"
+    if binding is False:
+        program = f"""import socket
+with socket.socket() as sock:
+ try: sock.bind(('127.0.0.1',{task["ports"]["PORT"]}))
+ except PermissionError: print('binding-denied')
+ else: raise AssertionError('unapproved local binding')
+"""
+        expected = "binding-denied"
+    result = subprocess.run(
+        [*policy["sandbox_argv"], "--", sys.executable, "-c", program],
+        env={**os.environ, **policy["launch_env"]},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert expected in result.stdout
 
 
 @pytest.mark.skipif(

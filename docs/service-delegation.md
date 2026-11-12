@@ -57,8 +57,15 @@ tools it can access:
 - Write its assigned checkout and the returned runtime root.
 - Read/connect the returned manager socket; bind/connect service sockets only
   inside its own runtime root.
-- Deny central state, other credentials, runtime roots and sockets. Reopen only
-  its checkout/runtime paths if they sit beneath a broader denied Lodex root.
+- A selected service with `allow_local_binding = true` gets local TCP binding,
+  independently of whether readiness uses `ready_argv` or `ready_port`.
+  When omitted, `ready_port` retains its existing binding inference; explicit
+  `false` disables it. Worker policy uses the approved snapshot; it is not a
+  per-port firewall. Application host access still needs an explicit allowlist.
+- Deny central state and unrelated control sockets. New workspaces and peer
+  runtimes are read-only; only assigned paths are writable. Peer credential
+  visibility does not grant access to its socket: keep the Unix allowlist scoped
+  to this grant and its own service runtime.
 
 Do not grant write access to all of `~/.lodex`, use another worker's credential,
 or reuse the Console's administrative token. An environment variable alone is
@@ -84,6 +91,18 @@ requests. Already issued launches may finish; existing services are not stopped.
 This revokes the API grant, not OS permissions or settings already delivered.
 Their records and private observations remain available for ordinary manager
 `service inspect`, `logs` and `stop`, including after delegation ends.
+For new environments these observations are under the saved workspace root;
+manager control handles remain under `LODEX_HOME`. Renewing a grant uses that
+task's saved root even if the default root changed. Existing services keep their
+old pinned handles until stopped/acknowledged; renewal never moves a live service.
+
+New delegated launches default `TMPDIR` to `GRANT_RUNTIME/t`, inside their
+existing filesystem and Unix-socket allowance, rather than inheriting the
+controller's global temp directory. The worker creates it under its own sandbox.
+An explicit project `TMPDIR` remains authoritative and must fit the reviewed
+worker scope. Running services retain their original environment. The short
+name leaves room for application-generated Unix socket names; those still must
+fit the platform's socket-path limit.
 
 After cleanup, a delegated supervisor retains its control socket until the manager
 records its terminal result and acknowledges it. `stop`, a subsequent `start`, or

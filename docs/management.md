@@ -48,7 +48,48 @@ Management is CLI-first and works without Codex or Ollama. History commands
 retain their own configuration and database under `$LODEX_HOME/history` by default.
 `LODEX_HOME` defaults to `~/.lodex`;
 management.db, operation logs and service handles live there, outside worktrees.
-New worktrees live under `LODEX_HOME/projects/PROJECT/BRANCH-SLUG--SHORT-ID`.
+New worktrees live under `WORKSPACE_ROOT/PROJECT/BRANCH-SLUG--SHORT-ID`.
+The default workspace root is the sibling `LODEX_HOME` plus `-workspaces`:
+`~/.lodex-workspaces` for the default management root. Override it with
+`LODEX_WORKSPACE_ROOT`, or set `workspace_root = "/absolute/path"` in
+`LODEX_HOME/management.toml`. The environment override takes precedence.
+Relative paths and overlaps with management state are rejected. Use the same
+management configuration for CLI and Console; the shell override applies only
+to the process receiving it.
+
+The workspace root must also stay outside registered task checkouts and Git
+metadata, and must not equal a registered project's source checkout. A
+project-local subdirectory is supported when the source is not itself a taskenv.
+Task checkouts must not contain a saved workspace root or enter
+the reserved `.r` / `delegation-sockets` namespaces. General management still
+supports nested checkout registration/target resolution, but overlapping
+checkouts cannot receive isolated worker policies. When registering an overlapping
+checkout, Lodex holds the existing task and writer locks through registration. A live
+worker, an unconfirmed exit, an operation in progress or a service awaiting shutdown
+or ACK blocks the change. Parallel sibling checkouts keep independent locks.
+Creation, attachment/rebinding and new worker policy admission enforce these
+rules, including records created by older releases. No existing policy file or
+running task is rewritten by validation.
+
+Each new environment records its resolved `workspace_root`. Changing the setting
+affects new registrations only. Existing checkouts, service handles, prepared
+handoffs, policies and sessions stay at their saved paths, including legacy
+environments under `~/.lodex/projects`. No running task is migrated or restarted.
+New worker temp/result files and delegated service observations use
+`WORKSPACE_ROOT/.r/TASKENV_ID/`; delegation endpoints use
+`WORKSPACE_ROOT/delegation-sockets/`. Short runtime paths accommodate Unix socket
+limits independently of readable project/branch names. An excessively long root
+fails with `socket_path_long`; select a shorter location for new environments.
+Management DBs, secrets, policies, locks, session records, operation logs and
+authoritative service control handles remain under `LODEX_HOME`.
+
+Worker policies protect management state from reads and writes. Other workspaces
+are readable but not writable, including tasks created after a worker starts.
+Only the assigned checkout, current worker/delegation runtimes and explicitly
+reviewed shared cache are writable. This is write isolation for cooperating tasks
+of one OS user, not confidentiality between projects or a VM boundary. Application
+ports, databases and external services still follow the project's resource contract.
+
 For example, branch `demo/change-title` can produce `demo-change-title--a3f19c82`.
 The slug uses lowercase ASCII letters and digits, replaces runs of other characters
 (including `/`) with `-`, trims edge hyphens, and is capped at 64 characters.
@@ -60,6 +101,43 @@ Directory names are fixed at creation. Branch renames or switches do not move
 worktrees or change taskenv IDs. Existing paths, including older ID-only directories
 and attached worktrees, remain unchanged; no migration is needed. Use the returned
 full ID or absolute path with `--target`, not the slug or short suffix alone.
+Removal and deregistration hold the worker-session lock and reject active or
+unconfirmed workers, active delegations, running operations, live services and
+pending terminal ACKs. Finish scoped cleanup, stop services, exit the worker and
+revoke its delegation first. For a delegated service that exits on its own,
+use `lodex service stop` for that task and service to record the terminal result
+and ACK its supervisor. Removal, deregistration and rebinding require the saved ACK
+for the current launch as well as completion of older pending ACKs.
+Retained runtime observations and central history are
+not deleted with the checkout; `forget` remains deregistration, not runtime pruning.
+
+For an unconfirmed worker exit, first preview its saved launch record:
+
+```sh
+lodex worktree reconcile-worker --target TASKENV_ID --json
+```
+
+Inspect that record's actual runtime and verify the old agent and unmanaged
+writers have exited. Then explicitly confirm that same launch record (the ID
+is distinct from the native conversation UUID):
+
+```sh
+lodex worktree reconcile-worker --target TASKENV_ID --record-id LAUNCH_RECORD_ID \
+  --evidence "Observed exit in the saved terminal; verified no old writer remains" --yes --json
+```
+
+An active writer lock, stale record ID or missing evidence rejects confirmation.
+New launch guards pass the lock descriptor to the agent, so an agent retaining
+that descriptor still blocks admission after guard termination. Older agents
+and programs that close inherited descriptors require the same manual runtime
+verification; a free lock/PID lookup alone is never exit proof. This command does
+not kill processes or stop managed services. It saves the original record and
+evidence centrally as a `worker-reconciliation` receipt, marks the session
+`reconciled`, and preserves its native UUID and unknown exit code. Receipts remain
+after later launches or deregistration. Resume still needs the same native UUID
+(or verified native storage for the first binding); confirmation does not allow a
+fresh conversation or remove service/operation/ACK teardown checks. Never delete
+or hand-edit the guard record to bypass admission.
 
 ```sh
 lodex project add app /absolute/repo --config /absolute/project.toml --json
@@ -200,6 +278,14 @@ supporting files so new worktrees inherit them from their starting ref. Exclude
 runtime records with narrow rules in `.lodex/.gitignore`, keeping the recipe files
 trackable; keep real secrets out of tracked files. The CLI does not generate
 integration scripts or copy the whole `.lodex/` directory.
+
+Direct repository commands (`prepare`, `run`, and ordinary `cleanup`) retain the
+caller's active Codex network-proxy settings so dependency tools use the same
+allowed destinations as that caller. This transport is execution-local: it is
+not exported to dotenv files or saved in task handoffs. Other caller credentials
+remain excluded. Controller service payloads and restricted-cleanup sandbox
+launches do not inherit the manager's proxy; those are separate execution
+boundaries. This behavior does not grant network destinations or local sockets.
 
 ## Command reference
 
@@ -381,6 +467,33 @@ side effects and is not guaranteed to execute only once. Without `env_file`,
 no file is exported automatically; the recipe may produce its own application
 settings. This optional field requires a Lodex version supporting it.
 
+To share live planning files, add the top-level `readonly_dirs = ["_plans"]`
+before any TOML table. The default is an empty list. Create the directory in
+the registered source checkout first. It may be a symlink to a dedicated
+directory. The effective list is the intersection of the task recipe and the
+current source declaration. Removing a name at either end withdraws the share.
+During prepare Lodex creates same-name links to the resolved source directories
+and records their destinations in the handoff. A conflicting file or directory
+is preserved. Worker launch and resume check those links and the source opt-in
+and apply read access to the actual destinations. Edits to the originals are
+visible immediately. Git worktree removal discards the links with the checkout.
+For a private untracked plan, `/_plans` in Git's local `info/exclude` covers
+both the source directory and the worktree symlink.
+
+Use dedicated data directories outside management state, Git metadata and task
+workspaces. A manager running a recipe with ordinary host permissions retains
+its normal access. Prepare checks all destinations, records the identity of
+each symlink it creates, and rolls back a failed link update. On re-prepare,
+it can retire or replace those links. Existing links without ownership records
+(including older installations) and user replacements remain user-owned.
+Stop the task worker before changing its links. Relaunch to apply new settings.
+
+Restricted cleanup uses the saved filesystem permissions as its ceiling. Under
+the task lock it denies withdrawn destinations, caps current shares at read,
+and retains previous denials. It can retire a task after a source symlink moves
+or a share is withdrawn, without preparing it again. A cleanup recipe that
+actually needs the withdrawn data will encounter the sandbox denial.
+
 A successful prepare result contains `handoff`: the taskenv ID/path, project,
 creation base commit (null for older/attached worktrees), checkout commit at
 preparation, configuration and delivered-file paths, configured service names,
@@ -448,12 +561,17 @@ only to services; repo commands retain their fixed three-second interrupt grace.
 | --- | --- | --- |
 | `ready_port` | Unset | A name from `[ports]`; mutually exclusive with `ready_argv`. |
 | `ready_argv` | Unset | A nonempty argument array for a startup probe; exit 0 means ready, other exits retry. |
+| `allow_local_binding` | Inferred from `ready_port` when omitted | Boolean sandbox capability for delegated workers. Set `true` for a listening service using `ready_argv`; explicit `false` disables the inference. |
 | `ready_timeout` | 10 seconds | Overall readiness budget; a number greater than 0 and at most 300. |
 | `stop_timeout` | 3 seconds | Grace before SIGKILL; a number greater than 0 and at most 300, saved at launch. |
 
 `ready_port` checks TCP availability after launch; it does not prove full app
 health or isolation. `ready_argv` executes directly in the service cwd/environment,
 with the same interpolation and secret-in-argv protection as service argv.
+Local binding is reviewed in the prepare/delegation snapshot independently of
+readiness. It applies only when that service is selected in the grant, affects
+newly issued worker policies, and is not a per-port firewall. Existing recipes
+and their digests are unchanged when the field is omitted.
 Probe-only environment variables `LODEX_SERVICE_PID` and `LODEX_SERVICE_STARTED_AT`
 identify the current launch; they are not TOML placeholders. Use them to reject
 stale readiness records. Probes run one at a time, have no stdin, discard output

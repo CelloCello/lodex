@@ -105,7 +105,7 @@ def test_display_name_preserves_legacy_identity_and_repeated_registration(
     assert repeated["display_name"] == "中文 Project"
     created = worktrees.create(registry, "fixture", "HEAD", "after-rename")
     assert created["project"] == "fixture"
-    assert Path(created["path"]).parent == registry.root / "projects" / "fixture"
+    assert Path(created["path"]).parent == Path(created["workspace_root"]) / "fixture"
     with pytest.raises(ManagementError) as duplicate:
         worktrees.project_add(registry, "other-id", repo, None)
     assert duplicate.value.details == {"existing_project": "fixture"}

@@ -42,6 +42,10 @@ application settings. Setup works without Herdr or an agent profile.
 Keep new integration scripts/support files under `.lodex/`; reference suitable
 existing scripts in place. Include integration files in the Git ref used for new
 worktrees, with narrow ignores for runtime state and secrets. Preserve user edits.
+When the user wants live read-only directories from the registered source checkout,
+declare top-level `readonly_dirs` in both the source and task recipe (the usual
+config copy suffices). Use the user's selected directory names; the default shares
+none. Create source directories before prepare and use the generated worker policy.
 `project add` creates a missing TOML skeleton, or copies `--config PATH`; existing
 files are validated and kept. Configuration fallback copies only missing TOML;
 Git checkout supplies tracked files normally. Updating the source does not refresh

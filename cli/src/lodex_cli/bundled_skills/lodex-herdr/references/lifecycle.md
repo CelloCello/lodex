@@ -15,8 +15,18 @@ from closing its terminal. Check the chosen runtime's close/parent behavior.
    program exited in its runtime and the launch-guard record is `exited`. A pane
    returning to a shell is different from a still-running/suspended agent. The
    guard's `worker_unknown` error deliberately blocks retries after an unconfirmed
-   exit; inspect and reconcile the old runtime, never delete the guard record
-   or trust a PID/port as proof it is safe to start a second writer.
+   exit. Preview `lodex worktree reconcile-worker --target TASKENV_ID --json`.
+   Inspect the saved runtime and confirm the old agent and unmanaged writers
+   exited, then use `--record-id LAUNCH_RECORD_ID --evidence "observed exit evidence" --yes`
+   on that command. This is the launch record ID, not the native UUID. An active
+   writer lock or stale ID rejects confirmation. New guards pass the lock to
+   their agent so a live agent retaining the descriptor also blocks recovery
+   after guard termination. Older agents or programs closing inherited FDs still
+   require manual verification. The command preserves the original record in a
+   central audit receipt, marks it `reconciled`, and keeps the native UUID and
+   unknown exit code. It does not kill processes, stop managed services or create
+   a new conversation. Never delete the guard record or trust a PID/port/free lock
+   alone as proof it is safe to start a second writer.
    A recorded `launch_failed` means no child process was created. After repairing
    that launch, retry under the same writer guard: a first launch needs no native
    UUID, while a failed resume still needs its original UUID. A program that was
@@ -80,8 +90,17 @@ lodex cleanup --target TASKENV_ID --worker-policy /absolute/worker-policies/ID.j
 
 This keeps registry/log/result collection in the manager and executes only
 `commands.cleanup` in the saved worker sandbox. It also works after the original
-agent has exited. Only that operation's private result file is opened for the
-runner beneath central state; central records and other environments stay denied.
+agent has exited. New policies stage results in the saved worker runtime; the
+manager uses an identity-checked directory handle to collect them. Central state
+stays denied and peer workspaces stay read-only. Legacy snapshots retain their
+single central result-file exception without rewriting a running worker's policy.
+On macOS, an already sandboxed manager may get `sandbox_apply: Operation not
+permitted` before this nested sandbox can start. Review the operation log first.
+The exact command above can use the manager's normal approval mechanism to launch
+the trusted outer runner outside that sandbox; `--worker-policy` must remain, so
+the cleanup recipe still executes inside its saved restrictions. This is not a
+retry of an operation denied inside the worker sandbox. Do not drop the policy
+or expand it to work around a cleanup recipe's permission failure.
 The outer sandbox launcher uses only trusted management environment inputs.
 Project variables and secrets are delivered through the private pipe to the
 command inside the sandbox, so loader settings cannot execute repo code before

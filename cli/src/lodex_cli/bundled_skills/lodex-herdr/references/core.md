@@ -28,6 +28,7 @@ Run the draft's `launcher_argv` with explicit worker cwd and parent A:
 
 ```text
 hc run --bg --parent A_TERMINAL --outlive-parent --name task-b --cwd /absolute/taskenv
+  env HC_SESSION=SELECTED_SESSION HC_SOCKET=/absolute/selected/core.sock
   LAUNCHER_ARGV... --policy /absolute/worker-policies/ID.json --runtime core
   --task-file /absolute/task.txt
 ```
@@ -36,6 +37,10 @@ Construct argv as an argument array or correctly quoted POSIX command, using
 actual values. The launcher reads the protected policy, explicitly sets its
 `CODEX_HOME`, and starts interactive Codex with `--no-daemon` and the task in
 native argv. It does not depend on the core inheriting A's shell exports.
+Pass the selected `HC_SESSION` and `HC_SOCKET` in the child command too: setting
+them only on the `hc` client does not guarantee the worker receives them. The
+guard records these values with the terminal ID for later recovery; this does
+not grant the worker access to the denied control socket.
 Service routing is delivered through the reviewed shell-environment settings.
 There is no print/one-shot mode and no second Herdr/agent-created worktree.
 
@@ -73,6 +78,20 @@ session before direct input. Do not attach workers to an unrelated App space.
 The user can directly interact with B/C, then return to A. Closing an App window
 leaves core terminals alive; closing/killing a terminal ends that program.
 Attaching/detaching a viewer and `--outlive-parent` are different lifecycles.
+
+For a main-checkout pane plus worker panes in one tab, launch each worker with
+the same explicit taskenv cwd/policy above, initially without App labels. Select
+the observed main tab and focus its pane, then use
+`herdr-app do terminal.keep --terminal NEW_WORKER_TERMINAL --place right`
+(or `down`). For an already visible worker, first use
+`herdr-app do terminal.park --terminal WORKER_TERMINAL`, confirm its pane is gone
+and the same core process is still live, then select/focus the destination and
+keep it there. Inspect `herdr-app ls` and the worker's cwd afterward.
+These operations present an existing terminal without starting another agent.
+Do not use a plain `pane.split` followed by a default-cwd agent launch as a
+substitute: that can leave workers sharing the main checkout. Controllers remain
+in their separate hidden terminals. Taskenv identity, writer admission, service
+handles and native resume do not depend on the visible tab or pane ID.
 
 Follow [lifecycle](lifecycle.md) for grant renewal. Confirm the old program exited,
 then launch the new policy with `--resume NATIVE_UUID` and focused continuation

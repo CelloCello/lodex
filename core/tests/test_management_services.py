@@ -217,13 +217,15 @@ def test_readiness_timeout_and_process_group(registry: Registry, repo: Path) -> 
         "stop_timeout=0",
         "stop_timeout=true",
         "stop_timeout=301",
+        "allow_local_binding=1",
+        'allow_local_binding="true"',
     ],
 )
 def test_invalid_readiness_or_stop_configuration(repo: Path, extra: str) -> None:
     (repo / CONFIG).write_text(
         'schema_version=1\n[ports]\nPORT=0\n[services.job]\nargv=["true"]\n' + extra
     )
-    with pytest.raises(ManagementError, match=r"ready_argv|stop_timeout"):
+    with pytest.raises(ManagementError, match=r"ready_argv|stop_timeout|allow_local_binding"):
         load(repo / CONFIG)
 
 

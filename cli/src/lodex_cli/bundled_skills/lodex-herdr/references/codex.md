@@ -46,15 +46,25 @@ permission profile via CLI overrides. It preserves model/reasoning settings. No
 the concrete rules before their first application; subsequent task paths can use
 the same previously approved rule contract without repeated permission questions.
 
-The draft denies central/peer data, reopens only the assigned checkout, its own
-grant/runtime and reviewed cache, makes shared Git metadata read-only, and uses
-private task temp. It enables network proxy enforcement with an explicit Unix
+For new taskenvs the draft denies central data, permits peer reads but not writes,
+and opens only the assigned checkout, its own grant/runtime and reviewed cache
+for writing. Shared Git metadata and workspace parents stay read-only; the latter
+also cover tasks created after launch. Global temp is read-only, with a private
+writable task temp. Legacy snapshots and runtime paths stay unchanged.
+It enables network proxy enforcement with an explicit Unix
 allowlist; with no `--allow-host`, no application TCP host is allowed. This is
 different from merely setting Unix rules while disabling the proxy.
+Selecting a delegated service with `allow_local_binding = true` enables local
+binding regardless of its readiness probe. If omitted, `ready_port` retains
+this inference; explicit `false` disables it. Services using an HTTP health
+probe in `ready_argv` must request binding explicitly. Review the generated policy: Codex does not
+restrict that capability to Lodex's allocated port. Keep explicit host allowlists
+and repository-owned port/resource isolation; do not treat ports as a security boundary.
 
-It disables apps/plugins at the feature gate as well as discovered entries,
-the implicit `codex_worktrees` MCP namespace, image generation, web search,
-hooks, JS REPL and subagents. Codex 0.166 can expose worktree tools without a
+The draft requests disabling apps/plugins at the feature gate as well as discovered
+entries, the implicit `codex_worktrees` and `codex_tui` MCP namespaces, image
+generation, web search, hooks, JS REPL and both multi-agent feature variants.
+Codex can expose built-in task/worktree tools without a
 local MCP entry; disabling only discovered entries is insufficient. The draft
 uses a disabled transport for that implicit namespace, never an active server.
 These broad tool defaults are reviewable draft
@@ -66,6 +76,18 @@ because they can override named permissions. Managed/remote settings and other
 execution surfaces still require actual-session inspection. See official
 [permissions](https://learn.chatgpt.com/docs/permissions) and
 [environment/tool configuration](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+In observed Codex 0.167 interactive workers, the explicit `codex_tui` denial removed
+TUI task-control tools, while collaboration tools remained advertised despite the
+multi-agent flags. One explicitly authorized diagnostic child also launched with
+no settings overrides: its own canary read succeeded, while peer checkout/runtime
+writes and a central management canary read returned `EPERM`. This verifies only
+those inherited command restrictions, not a disabled spawn capability or every
+host tool. Tool visibility alone does not prove an escape, and configured
+flags alone do not prove enforcement. Record the actual inventory and keep
+unverified host-tool boundaries distinct from successful command-sandbox probes.
+Do not claim complete host-tool isolation or use those routes to retry a denied
+command. Additional diagnostic agents need authorization for their scope.
 
 Resolve the actual source checkout, Git common directory, Lodex state root and
 Herdr session socket. Use `git rev-parse --path-format=absolute --git-common-dir`
@@ -94,12 +116,23 @@ The `-p` argument selects a **config file**. Its top-level `default_permissions`
 then selects the **permission profile** defined in that file. Existing suitable
 names may be reused; keep the actual manager/worker selection explicit.
 
-Replace the manager template's `/REPLACE_WITH_LODEX_HOME` and
+Replace the manager template's `/REPLACE_WITH_LODEX_HOME`, `/REPLACE_WITH_LODEX_WORKSPACE_ROOT` and
 `/REPLACE_WITH_HERDR_SOCKET_PATH` keys with observed absolute paths. Do not pass
 these markers to Codex or assume TOML interpolates shell variables. Quote paths
 as valid TOML, including backslashes where necessary. Show both rendered files
 and the exact launch commands for confirmation before installation or changes.
 Installing the Lodex skill copies these assets only; it does not install profiles.
+
+Keep three layers distinct: the skill describes the workflow; the selected config
+profile supplies the role's baseline; the generated per-launch worker policy
+supplies the actual taskenv paths, service route and tool restrictions. Merely
+reading the skill or opening a pane applies none of those runtime grants.
+The current launcher requires an existing worker config profile; its name need
+not be `lodex-worker`. Starting only `codex -p lodex-worker` does not substitute
+for the generated policy and guarded launch. Likewise, an external Codex App
+coordinator uses its own active permissions; a CLI manager profile on disk does
+not automatically grant them to the App conversation. Do not silently widen the
+App or worker permissions to make those entry points appear equivalent.
 
 Both templates include `"~/.cache/uv" = "write"` in their role's filesystem
 table. This is an explicit shared-cache exception to the worker's checkout/temp
@@ -175,6 +208,12 @@ different setup choice; do not silently reset it or keep unnecessary grants.
   local services require an explicitly reviewed policy: allowing localhost does
   not isolate one task's service from other ports. Docker/control sockets and
   broad network grants are additional capabilities, not routine fixes.
+- The manager also needs `network.allow_local_binding = true`: Lodex's port
+  allocator briefly binds loopback sockets while creating/attaching taskenvs.
+  This does not start application services, but the capability itself is broader
+  than the allocated ports and must be reviewed at setup. Verify an ephemeral
+  loopback bind before creating taskenvs. On `partial_create`, repair/attach the
+  returned checkout after fixing the setup; do not create a duplicate taskenv.
 
 Permission profiles are layered, not isolated replacements of base config.
 Remove conflicts only with confirmation: `sandbox_mode`,

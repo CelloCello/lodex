@@ -97,13 +97,13 @@ before applying them. This request is setup only: do not launch workers or
 create taskenvs.
 ```
 
-Replace the manager template's `/REPLACE_WITH_LODEX_HOME` and
+Replace the manager template's `/REPLACE_WITH_LODEX_HOME`, `/REPLACE_WITH_LODEX_WORKSPACE_ROOT` and
 `/REPLACE_WITH_HERDR_SOCKET_PATH` with observed absolute paths. Do not leave
 placeholders or shell variables in the TOML. Use `HERDR_SOCKET_PATH` from the
 intended Herdr session. When drafting outside Herdr, ask the user for that pane's
 information; do not guess a socket or scan unrelated sessions.
 The manager needs access to the source repo, necessary Git metadata, central
-Lodex state and the Herdr socket. The Lodex root may contain other projects'
+Lodex state, the configured workspace root and the Herdr socket. The Lodex root may contain other projects'
 records and plaintext secrets; confirm that management scope first.
 
 Both templates also grant write access to the shared uv package cache at
@@ -239,7 +239,10 @@ returned filesystem/socket/tool scope. This command writes a protected policy,
 not a global profile, and does not launch an agent. It uses a unique permission
 profile for each launch and fails on changed recipes or inspected legacy sandbox
 settings. The existing worker config is a baseline; it alone does not deliver
-delegated socket permissions or central/peer read denials.
+delegated socket permissions or central-state protection. New workspaces allow
+peer reads but prohibit peer writes. A read-only workspace parent covers new
+tasks created after worker launch; only the assigned paths are reopened for writes.
+Legacy snapshots keep their existing rules and paths and are not rewritten.
 
 Use the returned short `launcher_argv`, policy path and focused task file through
 the selected adapter:
@@ -301,8 +304,10 @@ lodex cleanup --target TASKENV_ID --worker-policy /absolute/worker-policies/ID.j
 The manager collects records/results while the sandbox executes the repository
 command. Plain `lodex cleanup` continues to use caller permissions; do not use it
 as an administrative retry for worker-modified code. The restricted path works
-after the agent exits and opens only its operation's result file beneath central
-state. It does not grant arbitrary command RPC access through delegation.
+after the agent exits. New policies stage results in the worker runtime; the
+manager reads through a pinned directory handle and retains the validated result
+centrally. Legacy policies retain their single central result-file exception.
+It does not grant arbitrary command RPC access through delegation.
 Project secret references must match the prepared handoff before the manager
 resolves them; cleanup edits cannot silently expand access to central secrets.
 

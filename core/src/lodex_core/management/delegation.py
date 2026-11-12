@@ -22,6 +22,7 @@ from lodex_core.management.common import ManagementError, now, private_dir, writ
 from lodex_core.management.environment import inputs
 from lodex_core.management.project_config import CONFIG, digest, load
 from lodex_core.management.store import Registry
+from lodex_core.management.workspace import runtime_base, validate_checkout
 
 ENVIRONMENT = "LODEX_SERVICE_DELEGATION"
 KIND = "service-delegation"
@@ -81,18 +82,33 @@ class Controller:
         with registry.lock(task["id"]):
             registry.reload_task(self.task)
             worktrees.require_present(self.task)
-            self.config, _, _ = inputs(registry, self.task, secrets=False)
+            validate_checkout(registry, self.task)
+            # Create/prepare already allocated ports. Delegation only snapshots
+            # this task; unrelated controller starts need no global registry lock.
+            self.config, _, _ = inputs(registry, self.task, secrets=False, persist=False)
             if not self.names or set(self.names) - self.config["services"].keys():
                 raise ManagementError("delegation_scope", "Select configured services explicitly")
             if any(
                 grant["taskenv"] == task["id"] and grant["active"] for grant in registry.all(KIND)
             ):
                 raise ManagementError("delegation_active", "Revoke the existing delegation first")
-            root = registry.root / "delegated" / self.identity[:12]
-            endpoint = registry.root / "delegation-sockets" / f"{self.identity[:12]}.sock"
+            base = runtime_base(registry, self.task)
+            root = (
+                base / "g" / self.identity[:12]
+                if "workspace_root" in self.task
+                else base / "delegated" / self.identity[:12]
+            )
+            socket_root = (
+                Path(self.task["workspace_root"])
+                if "workspace_root" in self.task
+                else registry.root
+            )
+            endpoint = socket_root / "delegation-sockets" / f"{self.identity[:12]}.sock"
             # Leave room for the per-launch service socket too (macOS sun_path).
             if len(os.fsencode(endpoint)) > 100 or len(os.fsencode(root)) + 20 > 100:
-                raise ManagementError("socket_path_long", "Use a shorter Lodex state root")
+                raise ManagementError(
+                    "socket_path_long", "Use a shorter workspace root for new taskenvs"
+                )
             private_dir(root.parent)
             root.mkdir(mode=0o700)
             observed = root.stat()

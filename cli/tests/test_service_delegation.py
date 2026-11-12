@@ -405,6 +405,8 @@ def test_actual_worker_sandbox_and_service_children_cannot_cross_taskenv(
     before = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in profiles if p.is_file()}
     peer = Path(task_b["path"]) / "peer-marker"
     peer.write_text("untouched")
+    peer_runtime = Path(b["runtime_root"]) / "peer-marker"
+    peer_runtime.write_text("untouched")
     central = store.root / "central-marker"
     central.write_text("untouched")
     client_b = Client(Path(b["credential_file"]))
@@ -412,11 +414,13 @@ def test_actual_worker_sandbox_and_service_children_cannot_cross_taskenv(
     control_b = json.loads(Path(running_b["delegated"]["control_file"]).read_text())
     attack = {
         "peer": str(peer),
+        "peer_runtime": str(peer_runtime),
         "central": str(central),
         "credential": b["credential_file"],
         "socket": b["socket"],
         "service_socket": control_b["socket"],
         "peer_pid": running_b["pid"],
+        "own_runtime": a["runtime_root"],
     }
     (Path(task_a["path"]) / "attack.json").write_text(json.dumps(attack))
     # Worker edits application code after delegation; the manager never executes it.
@@ -424,11 +428,21 @@ def test_actual_worker_sandbox_and_service_children_cannot_cross_taskenv(
 from pathlib import Path
 attack=json.loads(Path('attack.json').read_text())
 proof={}
-for key in ('peer','central'):
+temporary=Path(os.environ['TMPDIR'])
+proof['private_temp']=temporary==Path(attack['own_runtime'])/'t'
+temporary_marker=temporary/'own-temp-marker'
+temporary_marker.write_text('owned')
+with socket.socket(socket.AF_UNIX) as owned_socket:
+ owned_socket.bind(str(temporary/'temp.sock'))
+ proof['private_temp_socket']=True
+(temporary/'temp.sock').unlink()
+for key in ('peer','peer_runtime','central'):
  try: Path(attack[key]).write_text('cross-task write'); proof[key]=False
  except PermissionError: proof[key]=True
-try: Path(attack['credential']).read_text(); proof['credential']=False
-except PermissionError: proof['credential']=True
+proof['peer_read']=Path(attack['peer']).read_text()=='untouched'
+proof['credential_read']=isinstance(json.loads(Path(attack['credential']).read_text()),dict)
+try: Path(attack['central']).read_text(); proof['central_read']=False
+except PermissionError: proof['central_read']=True
 for key in ('socket','service_socket'):
  with socket.socket(socket.AF_UNIX) as client:
   try: client.connect(attack[key]); proof[key]=False
@@ -443,6 +457,10 @@ time.sleep(60)
     (Path(task_a["path"]) / "job.py").write_text(probe)
     filesystem = {
         str(store.root): "deny",
+        str(Path(tempfile.gettempdir()).resolve()): "read",
+        str(Path("/tmp").resolve()): "read",
+        task_a["workspace_root"]: "read",
+        task_b["workspace_root"]: "read",
         task_a["path"]: "write",
         a["runtime_root"]: "write",
         a["socket"]: "read",
@@ -506,7 +524,7 @@ print(json.dumps({'worker_service_lifecycle':True,'child_sandbox':proof,'cross_t
         pytest.skip("Host cannot enforce a nested Codex sandbox")
     assert result.returncode == 0, result.stdout + result.stderr
     assert '"cross_target_denied": true' in result.stdout
-    assert peer.read_text() == central.read_text() == "untouched"
+    assert peer.read_text() == peer_runtime.read_text() == central.read_text() == "untouched"
     assert client_b.perform("inspect", "job", b["taskenv"])["pid"] == running_b["pid"]
     assert before == {
         str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in profiles if p.is_file()

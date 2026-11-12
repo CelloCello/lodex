@@ -73,14 +73,33 @@ def inputs(
     return config, values, known
 
 
-def process_env(values: dict[str, str]) -> dict[str, str]:
+# Execution-local transport settings, not project credentials or saved task inputs.
+# Do not inherit these into controller payloads or a newly established sandbox.
+NETWORK_ENV_KEYS = frozenset(
+    "HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY FTP_PROXY WS_PROXY WSS_PROXY "
+    "http_proxy https_proxy all_proxy no_proxy ftp_proxy ws_proxy wss_proxy "
+    "NPM_CONFIG_PROXY NPM_CONFIG_HTTP_PROXY NPM_CONFIG_HTTPS_PROXY NPM_CONFIG_NOPROXY "
+    "npm_config_proxy npm_config_http_proxy npm_config_https_proxy npm_config_noproxy "
+    "PIP_PROXY YARN_HTTP_PROXY YARN_HTTPS_PROXY BUNDLE_HTTP_PROXY BUNDLE_HTTPS_PROXY "
+    "BUNDLE_NO_PROXY DOCKER_HTTP_PROXY DOCKER_HTTPS_PROXY ELECTRON_GET_USE_PROXY "
+    "NODE_USE_ENV_PROXY CODEX_NETWORK_PROXY_ACTIVE CODEX_NETWORK_PROXY_ATTRIBUTION".split()
+)
+
+
+def process_env(values: dict[str, str], *, caller_network: bool = False) -> dict[str, str]:
     # Do not implicitly copy the caller's project credentials into another taskenv.
     inherited = {
         k: v
         for k, v in os.environ.items()
         if k in {"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT"}
     }
-    return {**inherited, **values}
+    result = {**inherited, **values}
+    if caller_network and os.environ.get("CODEX_NETWORK_PROXY_ACTIVE"):
+        # Only direct commands retain the caller's active Codex network route.
+        # Project inputs cannot replace it, and it is never exported/persisted.
+        result = {k: v for k, v in result.items() if k not in NETWORK_ENV_KEYS}
+        result.update({k: v for k, v in os.environ.items() if k in NETWORK_ENV_KEYS})
+    return result
 
 
 def command_argv(spec: dict[str, Any], values: dict[str, str], known: list[str]) -> list[str]:

@@ -308,6 +308,7 @@ lodex skill install lodex-herdr
 | 功能 | 設定位置 | 預設資料位置 |
 | --- | --- | --- |
 | 環境管理 | 各工作目錄的 `.lodex/project.toml`；配置的連接埠與中央 secrets 存於 registry | `~/.lodex/management.db`；日誌與服務控制資料位於 `~/.lodex`（`LODEX_HOME`） |
+| 任務工作區 | `LODEX_HOME/management.toml` 的 `workspace_root`，可由 `LODEX_WORKSPACE_ROOT` 覆寫 | 預設 `~/.lodex-workspaces`；既有任務保留原路徑 |
 | 對話歷史 | `~/.lodex/history/config.toml`（`LODEX_CONFIG`） | `~/.lodex/history/lodex.db`（`LODEX_DATA_DIR`／`LODEX_DB_PATH`） |
 
 `LODEX_HOME` 可調整兩項功能的預設根目錄（預設為 `~/.lodex`）。
