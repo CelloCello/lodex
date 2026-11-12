@@ -343,6 +343,7 @@ def _attach_locked(
                             details=preview,
                         )
                     task = updated
+                    task.pop("owned_readonly_links", None)
                     for key in ("inode", "common_inode", "git_inode", "removed_at", "setup_error"):
                         task.pop(key, None)
                 else:

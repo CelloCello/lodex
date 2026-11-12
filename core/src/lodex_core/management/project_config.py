@@ -49,6 +49,7 @@ def load(path: Path) -> dict[str, Any]:
         "commands",
         "services",
         "tools",
+        "readonly_dirs",
         "taskenv",
     }
     if (
@@ -57,7 +58,26 @@ def load(path: Path) -> dict[str, Any]:
         or set(data) - allowed
     ):
         raise ManagementError("invalid_config", "Expected schema_version=1 and supported fields")
-    for section in allowed - {"schema_version", "tools"}:
+    directories = data.get("readonly_dirs", [])
+    if not isinstance(directories, list):
+        raise ManagementError("invalid_config", "readonly_dirs must be an array of directories")
+    for item in directories:
+        if (
+            not isinstance(item, str)
+            or not item
+            or "\x00" in item
+            or any(
+                part.casefold() in {"", ".", "..", ".git", ".lodex", ".agents", ".codex", ".aws"}
+                for part in item.split("/")
+            )
+        ):
+            raise ManagementError("invalid_config", "readonly_dirs needs project-relative paths")
+    names = {item.casefold() for item in directories}
+    if len(names) != len(directories) or any(
+        str(parent) in names for item in names for parent in Path(item).parents
+    ):
+        raise ManagementError("invalid_config", "readonly_dirs contains overlapping names")
+    for section in allowed - {"schema_version", "tools", "readonly_dirs"}:
         value = data.setdefault(section, {})
         if not isinstance(value, dict):
             raise ManagementError("invalid_config", f"{section} must be a table")

@@ -27,7 +27,6 @@ from lodex_cli import worker_policy
 from lodex_core.management.common import ManagementError, now, read_json, write_private
 from lodex_core.management.delegation import KIND, Client
 from lodex_core.management.environment import process_env
-from lodex_core.management.project_config import CONFIG, digest, load
 from lodex_core.management.store import Registry
 from lodex_core.management.worker_sessions import TERMINAL_STATES, session_lock
 
@@ -257,13 +256,6 @@ def run(policy_path: Path, kind: str, task_file: Path, resume: str | None = None
         child_fds: list[int] = []
         with session_lock(store.root, task["id"], child_fds=child_fds) as record_path:
             policy = worker_policy.read(store, task, policy_path)
-            if (
-                digest(load(Path(task["path"]) / CONFIG))
-                != policy["handoff"]["configuration_digest"]
-            ):
-                raise ManagementError(
-                    "worker_unprepared", "Recipe changed after preparation; review it"
-                )
             if policy["delegation"] is not None:
                 grant = store.get(KIND, policy["delegation"])
                 if not grant["active"] or grant["taskenv"] != task["id"]:

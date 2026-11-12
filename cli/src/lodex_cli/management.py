@@ -326,13 +326,14 @@ def cleanup(
 
     with registry() as store:
         task = resolve(store, target)
-        policy = policies.read(store, task, worker_policy)
+        policy = policies.read_snapshot(store, task, worker_policy)
 
         def execute(result: Path) -> list[str]:
             # New policies stage results in the task's runtime. Legacy snapshots
             # retain their narrow central result-file exception without rewriting.
+            rules = policies.cleanup_filesystem(store, task, policy)
             rule = f"permissions.{policy['permission_profile']}.filesystem=" + policies.toml_value(
-                {**policy["filesystem"], str(result): "write"}
+                {**rules, str(result): "write"}
             )
             return [
                 *policy["sandbox_argv"],

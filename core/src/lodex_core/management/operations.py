@@ -32,6 +32,7 @@ from lodex_core.management.processes import (
     signal_group,
 )
 from lodex_core.management.project_config import CONFIG, check_command, digest, load, supply
+from lodex_core.management.readonly_dirs import prepare_links
 from lodex_core.management.service_runtime import runtime_root
 from lodex_core.management.store import Registry
 from lodex_core.management.workspace import validate_checkout
@@ -190,6 +191,11 @@ def run(
             try:
                 for sig in previous:
                     signal.signal(sig, interrupted)
+                shared = (
+                    prepare_links(registry, task, config.get("readonly_dirs", []))
+                    if command == "prepare"
+                    else {}
+                )
                 environment = {
                     **process_env(values, caller_network=execution is None),
                     **(execution_env or {}),
@@ -265,6 +271,9 @@ def run(
                         record["error"] = "invalid_partial_result"
                     else:
                         record.update(state="unknown", error=exc.code)
+            except ManagementError as exc:
+                record.update(state="failed", error=exc.code)
+                raise
             except OSError:
                 record.update(state="failed", error="command_launch_failed")
             finally:
@@ -293,6 +302,7 @@ def run(
                         "checkout_commit": checkout_commit,
                         "configuration": str(root / CONFIG),
                         "configuration_digest": digest(config),
+                        **({"readonly_dirs": shared} if shared else {}),
                         "env_file": str(root / delivery) if delivery is not None else None,
                         "configured_services": sorted(config["services"]),
                         "secret_refs": config["secrets"],

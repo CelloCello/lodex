@@ -217,14 +217,14 @@ def test_restricted_cleanup_rechecks_overlap_under_its_task_lock(
     store, task = delegated["store"], delegated["tasks"][0]
     nested = Path(task["path"]) / "nested"
     worktrees.git(Path(task["common"]), "worktree", "add", "--detach", str(nested), "HEAD")
-    read = worker_policy.read
+    read = worker_policy.read_snapshot
 
     def read_before_registration(*args: Any) -> dict[str, Any]:
         policy = read(*args)
         worktrees.attach(store, task["project"], nested)
         return policy
 
-    monkeypatch.setattr(worker_policy, "read", read_before_registration)
+    monkeypatch.setattr(worker_policy, "read_snapshot", read_before_registration)
     result = CliRunner().invoke(
         app,
         [

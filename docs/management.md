@@ -467,6 +467,33 @@ side effects and is not guaranteed to execute only once. Without `env_file`,
 no file is exported automatically; the recipe may produce its own application
 settings. This optional field requires a Lodex version supporting it.
 
+To share live planning files, add the top-level `readonly_dirs = ["_plans"]`
+before any TOML table. The default is an empty list. Create the directory in
+the registered source checkout first. It may be a symlink to a dedicated
+directory. The effective list is the intersection of the task recipe and the
+current source declaration. Removing a name at either end withdraws the share.
+During prepare Lodex creates same-name links to the resolved source directories
+and records their destinations in the handoff. A conflicting file or directory
+is preserved. Worker launch and resume check those links and the source opt-in
+and apply read access to the actual destinations. Edits to the originals are
+visible immediately. Git worktree removal discards the links with the checkout.
+For a private untracked plan, `/_plans` in Git's local `info/exclude` covers
+both the source directory and the worktree symlink.
+
+Use dedicated data directories outside management state, Git metadata and task
+workspaces. A manager running a recipe with ordinary host permissions retains
+its normal access. Prepare checks all destinations, records the identity of
+each symlink it creates, and rolls back a failed link update. On re-prepare,
+it can retire or replace those links. Existing links without ownership records
+(including older installations) and user replacements remain user-owned.
+Stop the task worker before changing its links. Relaunch to apply new settings.
+
+Restricted cleanup uses the saved filesystem permissions as its ceiling. Under
+the task lock it denies withdrawn destinations, caps current shares at read,
+and retains previous denials. It can retire a task after a source symlink moves
+or a share is withdrawn, without preparing it again. A cleanup recipe that
+actually needs the withdrawn data will encounter the sandbox denial.
+
 A successful prepare result contains `handoff`: the taskenv ID/path, project,
 creation base commit (null for older/attached worktrees), checkout commit at
 preparation, configuration and delivered-file paths, configured service names,

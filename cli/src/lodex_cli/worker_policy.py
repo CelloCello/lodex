@@ -22,6 +22,7 @@ from lodex_core.management import worktrees
 from lodex_core.management.common import ManagementError, private_dir, read_json, write_private
 from lodex_core.management.delegation import KIND, Client
 from lodex_core.management.project_config import CONFIG, check_command, digest, load
+from lodex_core.management.readonly_dirs import shared_dirs, source_targets
 from lodex_core.management.store import Registry
 from lodex_core.management.workspace import runtime_base, validate_checkout
 
@@ -101,6 +102,9 @@ def render(
     if preparation["handoff"].get("binding_revision", 0) != task.get("binding_revision", 0):
         raise ManagementError("worker_unprepared", "Environment was rebound; select a new prepare")
     config = load(root / CONFIG)
+    shared = preparation["handoff"].get("readonly_dirs", {})
+    if shared != shared_dirs(registry, task, config.get("readonly_dirs", [])):
+        raise ManagementError("worker_unprepared", "Shared directories changed; prepare again")
     if preparation["handoff"].get("configuration_digest") != digest(config):
         raise ManagementError(
             "worker_unprepared", "Recipe changed since prepare; review and prepare it"
@@ -113,6 +117,11 @@ def render(
     if not cache.is_absolute():
         raise ManagementError("worker_cache", "Pass the observed absolute uv cache directory")
     cache = cache.resolve()
+    for destination in map(Path, shared.values()):
+        for boundary in [cache, codex_home, *(denied_paths or []), *(control_sockets or [])]:
+            boundary = boundary.resolve()
+            if destination.is_relative_to(boundary) or boundary.is_relative_to(destination):
+                raise ManagementError("worker_path", "Shared directory overlaps a protected path")
     protected_roots = [registry.root, Path(task["common"])]
     protected_roots.extend(
         Path(t["workspace_root"]) for t in registry.all("taskenv") if "workspace_root" in t
@@ -171,6 +180,7 @@ def render(
             # its metadata readable through the more specific rules above.
             filesystem[peer["path"]] = "read" if "workspace_root" in peer else "deny"
     filesystem.update({str(root): "write", str(runtime): "write"})
+    filesystem.update(dict.fromkeys(shared.values(), "read"))
     if grant_root is not None:
         filesystem[grant_root] = "write"
     for protected in (".git", ".codex", ".agents", ".aws"):
@@ -263,7 +273,7 @@ def render(
     return {**result, "policy_file": str(destination), "applied": False}
 
 
-def read(registry: Registry, task: dict[str, Any], path: Path) -> dict[str, Any]:
+def read_snapshot(registry: Registry, task: dict[str, Any], path: Path) -> dict[str, Any]:
     """Only a manager-owned, task-bound policy can wrap administrative cleanup."""
     registry.reload_task(task)
     expected = registry.root / "worker-policies"
@@ -286,3 +296,49 @@ def read(registry: Registry, task: dict[str, Any], path: Path) -> dict[str, Any]
     worktrees.require_present(task)
     validate_checkout(registry, task, worker=True)
     return data
+
+
+def read(registry: Registry, task: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Validate a worker launch or native resume, including its prepared links."""
+    data = read_snapshot(registry, task, path)
+    shared = data.get("handoff", {}).get("readonly_dirs", {})
+    config = load(Path(task["path"]) / CONFIG)
+    if digest(config) != data["handoff"]["configuration_digest"]:
+        raise ManagementError("worker_unprepared", "Recipe changed after preparation; review it")
+    names = config.get("readonly_dirs", [])
+    if shared_dirs(registry, task, names) != shared:
+        raise ManagementError("worker_policy", "Shared directories changed; prepare a new policy")
+    return data
+
+
+def cleanup_filesystem(
+    registry: Registry,
+    task: dict[str, Any],
+    policy: dict[str, Any],
+) -> dict[str, str]:
+    """Cap the saved filesystem at each changed path boundary while holding the task lock."""
+    if policy["task_identity"] != worktrees.binding(task):
+        raise ManagementError("identity_changed", "Worker policy binding changed; regenerate it")
+    config = load(Path(task["path"]) / CONFIG)
+    saved: dict[str, str] = policy["filesystem"]
+    previous = set(map(Path, policy["handoff"].get("readonly_dirs", {}).values()))
+    current = set(
+        map(
+            Path,
+            source_targets(registry, task, config.get("readonly_dirs", []), cleanup=True).values(),
+        )
+    )
+    rules = saved.copy()
+    for path in previous | current | set(map(Path, saved)):
+        if any(path.is_relative_to(directory) for directory in current):
+            # A new read cap can reduce a write grant, but cannot open a
+            # previously denied subtree. Keep the original default for paths
+            # without a saved explicit rule.
+            inherited = next(
+                (saved[str(p)] for p in (path, *path.parents) if str(p) in saved), None
+            )
+            if inherited in ("read", "write"):
+                rules[str(path)] = "read"
+        elif any(path.is_relative_to(directory) for directory in previous):
+            rules[str(path)] = "deny"
+    return rules
